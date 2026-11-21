@@ -1,8 +1,8 @@
 # Momentum Trading Strategy
 
-A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in a quarterly walk-forward backtest over 2023 and over 2010–2023.
+A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in a quarterly walk-forward backtest over 2023 and over 2010–2023, after transaction costs.
 
-> **Status:** Phase 1 (baseline) and Phase 2 (correctness fixes) are complete. Over 2010–2023 the strategy returned 12.6% a year against 11.1% for an S&P 500 proxy, with a Sharpe ratio of 0.54 against 0.52. That is no real risk-adjusted edge. See [Results](#results).
+> **Status:** Phases 1–3 are complete (except dividends, which the data does not support). **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). See [Results](#results).
 
 ---
 
@@ -11,36 +11,44 @@ A research project that selects S&P 500 stocks with a momentum signal, forms ret
 All the main work is in [`main.ipynb`](main.ipynb). On each rebalance date (the last trading day of each quarter), it runs:
 
 ```
-Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA views ─▶ Black-Litterman ─▶ Hold one quarter
+Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA views ─▶ Black-Litterman ─▶ Hold one quarter (pay costs)
 ```
 
-1. **Data cleaning.** Removes exchange suffixes from tickers (`AAPL UW Equity` → `AAPL`). Drops blank rows (28% of the raw file) *before* de-duplicating, so a blank row can never replace a real price.
+1. **Data cleaning.** Removes exchange suffixes from tickers (`AAPL UW Equity` → `AAPL`). Drops blank rows (28% of the raw file) *before* de-duplicating. When a company has two listings with different prices, keeps the one named in that date's S&P 500 snapshot.
 2. **Point-in-time universe.** The 50 largest stocks that were **in the S&P 500 on that date**, taken from the quarterly constituent snapshots. This avoids survivorship bias.
-3. **Momentum selection.** Ranks the universe by 12-1 month momentum (12-month return, skipping the latest month), excludes overbought stocks (RSI > 70), and keeps the top 25. MACD is reported to confirm the trend.
-4. **ARIMA views.** `auto_arima` on each stock's quarterly **log returns**, with no seasonal term. The next-quarter forecast becomes that stock's Black-Litterman view.
-5. **Black-Litterman.** A market-cap-implied prior blended with the ARIMA views, all in annual excess returns. The optimiser maximises Sharpe, long-only, with at most 20% in any one stock.
-6. **Backtest.** The weights are held buy-and-hold for one quarter, then the whole process is re-run using only data up to the next rebalance date.
+3. **Momentum selection.** Ranks the universe by 12-1 month momentum (12-month return, skipping the latest month), excludes overbought stocks (RSI > 70), and keeps the top 25.
+4. **ARIMA views.** `auto_arima` on each stock's quarterly **log returns**, with no seasonal term and the intercept forced on. The next-quarter forecast becomes that stock's Black-Litterman view. Forecasts are fitted in parallel and cached.
+5. **Black-Litterman.** A market-cap-implied prior blended with the ARIMA views, all in annual excess returns, using a Ledoit-Wolf shrunk covariance. The optimiser maximises Sharpe, long-only, with at most 20% in any one stock.
+6. **Backtest.** Holdings drift with prices for one quarter, then the process re-runs using only data up to the next rebalance date. Every portfolio, benchmarks included, pays 10 bps per unit traded.
 
 ### Results
 
-| | CAGR 2010–2023 | Volatility | Sharpe | Max drawdown | 2023 return |
-|---|---|---|---|---|---|
-| **Strategy** | **12.6%** | 20.5% | **0.54** | −33.0% | 12.7% |
-| Equal-weight top 50 | 10.2% | 16.8% | 0.48 | −31.1% | 23.1% |
-| Cap-weight top 50 | 11.6% | 17.9% | 0.54 | −30.0% | 37.0% |
-| Cap-weight S&P 500 (index proxy) | 11.1% | 17.5% | 0.52 | −33.6% | 25.6% |
+2010–2023, after 10 bps costs, price returns:
 
-These are price returns (no dividends) before transaction costs, with quarterly rebalancing. The S&P 500 proxy tracks the real index closely: 25.6% vs 24.2% in 2023, and 11.1% vs about 10.9% a year over 2010–2023.
+| | CAGR | Volatility | Sharpe | Max drawdown | Turnover / yr | t-stat vs S&P | 2023 |
+|---|---|---|---|---|---|---|---|
+| **Strategy** | **12.2%** | 20.4% | **0.52** | −33.0% | 453% | 0.58 | 11.5% |
+| Equal-weight top 50 | 10.1% | 16.8% | 0.48 | −31.1% | 67% | −1.46 | 23.1% |
+| Cap-weight top 50 | 11.5% | 17.9% | 0.53 | −30.0% | 22% | 0.51 | 37.2% |
+| Cap-weight S&P 500 (index proxy) | 11.1% | 17.5% | 0.52 | −33.6% | 8% | — | 25.7% |
 
-The strategy earns more than the benchmarks but takes more risk to do it. Its Sharpe ratio is no better than holding the 50 largest stocks, and it badly lagged in 2023. The notebook's findings section covers the caveats.
+The S&P 500 proxy tracks the real index closely: 25.6% vs 24.2% before costs in 2023, and 11.1% vs about 10.9% a year over 2010–2023.
+
+**What the analysis shows**
+
+- **No significant edge.** The strategy earns about 1.6% a year more than the S&P proxy, but with more volatility and the same Sharpe ratio. A t-statistic of 0.58 is well short of the ~2 needed to rule out luck.
+- **No layer clearly adds value.** Adding momentum selection, then Black-Litterman, then ARIMA views moves the Sharpe ratio from 0.48 to 0.49, 0.49 and 0.52, while turnover rises from 67% to 453% a year.
+- **The result is not fragile, just unremarkable.** Across 13 setting and cost variants the Sharpe ranges from 0.43 to 0.60, the best t-statistic is about 1.2, and the advantage disappears at costs of about 45 bps.
+- **The two halves agree.** Sharpe 0.58 vs 0.53 for the S&P proxy in 2010–2016, and 0.50 vs 0.52 in 2017–2023.
 
 ### Files
 
 | File | Purpose |
 |------|---------|
-| `main.ipynb` | The full pipeline, backtests and findings (runs in about 5 minutes) |
+| `main.ipynb` | The full pipeline, backtests, analysis and findings (about 5 minutes on the first run, 2 minutes once the ARIMA cache exists) |
 | `requirements.txt` | Package versions the notebook was verified with |
 | `archive/` | Phase 1 notebooks, kept for reference |
+| `cache/` | ARIMA forecast cache, created by the notebook (not committed) |
 
 ### Data (not included)
 
@@ -110,13 +118,21 @@ Status key: ⬜ To do · 🔄 In progress · ✅ Done
 
 **Progress: 14 / 14 done.** The notebook also went from 18MB to under 1MB: it now has 5 summary charts instead of 81 per-stock plots.
 
-### Phase 3: Robustness (proposed)
+### Phase 3: Robustness ✅ Complete (1 task blocked by data)
 
-| # | Task | Why | Status |
-|---|------|-----|--------|
-| 3.1 | Include dividends (total return) | Price returns understate every portfolio and favour low-yield stocks. | ⬜ To do |
-| 3.2 | Model transaction costs | The strategy turns over far more than the benchmarks. | ⬜ To do |
-| 3.3 | Test parameter sensitivity | Results moved from 19% to 13% in 2023 after one ARIMA change, and the 20% weight cap was chosen after seeing results. Test a grid of settings and report the spread. | ⬜ To do |
-| 3.4 | Compare against simpler alternatives | Check whether ARIMA and Black-Litterman add anything over equal-weighting the top-momentum stocks. | ⬜ To do |
-| 3.5 | Shrink the covariance estimate (Ledoit-Wolf) | The sample covariance of 25 stocks is noisy, and max-Sharpe amplifies the noise. | ⬜ To do |
-| 3.6 | Fix ticker reuse | Merging listings by base ticker can join two different companies that used the same symbol at different times. | ⬜ To do |
+| # | Task | Outcome | Status |
+|---|------|---------|--------|
+| 3.1 | Include dividends (total return) | The dataset's dividend field (`DVD_YLD_IND`) is empty in every row, so total returns cannot be computed. Needs a total-return series (for example Bloomberg `TOT_RETURN_INDEX_GROSS_DVDS`) or dividend history. All results are labelled as price returns. | ⛔ Blocked (no data) |
+| 3.2 | Model transaction costs | Holdings now drift between rebalances, turnover is measured against the drifted weights, and every portfolio pays 10 bps per unit traded. The strategy trades 453% a year against 8% for the S&P proxy; its advantage disappears at about 45 bps. | ✅ Done |
+| 3.3 | Test parameter sensitivity | Varied the weight cap, number of stocks, RSI filter, τ, covariance method and costs one at a time, and split the period in half. Sharpe ranges from 0.43 to 0.60 (S&P: 0.52); none is significant. Also added information ratios and t-statistics against the S&P proxy. | ✅ Done |
+| 3.4 | Compare against simpler alternatives | Layer-by-layer comparison: momentum adds +0.01 Sharpe, the optimiser +0.00, ARIMA views +0.03 (with about double the turnover). | ✅ Done |
+| 3.5 | Shrink the covariance estimate (Ledoit-Wolf) | Now the default. It makes no measurable difference here, because the 20% weight cap already limits how far the optimiser can chase noise. Also found that τ has no effect on the posterior mean, since the He-Litterman Ω is proportional to τ. | ✅ Done |
+| 3.6 | Fix ticker reuse | Investigated: Bloomberg already gives delisted companies unique codes, so no two companies share a symbol (the only name change in the snapshots is a rename, Boston Properties → BXP). The real issue was duplicate listings disagreeing on price (740 of 421k overlapping dates differ by more than 0.5%). Cleaning now keeps the listing named in each date's snapshot. | ✅ Done |
+
+**Progress: 5 / 6 done, 1 blocked.**
+
+### Possible next steps
+
+- Get total-return data to complete 3.1.
+- Test momentum on the full S&P 500 rather than the 50 largest stocks; momentum is usually stronger outside mega-caps.
+- Lower turnover, for example by only trading when weights move by more than a threshold.
