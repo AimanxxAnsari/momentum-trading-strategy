@@ -1,0 +1,9 @@
+# Data (not redistributable / too large for GitHub)
+tickers/
+dataset/
+*.csv
+*.xlsx
+
+# OS / Jupyter
+.DS_Store
+.ipynb_checkpoints/
