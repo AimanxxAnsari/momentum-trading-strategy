@@ -7,3 +7,6 @@ dataset/
 # OS / Jupyter
 .DS_Store
 .ipynb_checkpoints/
+
+# ARIMA forecast cache (recomputed by the notebook)
+cache/
