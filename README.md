@@ -1,8 +1,73 @@
 # Momentum Trading Strategy
 
-A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in a quarterly walk-forward backtest over 2023 and over 2010–2023, after transaction costs.
+A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in quarterly walk-forward backtests (2023, and 2010–2023), after transaction costs, against market benchmarks.
 
-> **Status:** Phases 1–3 are complete (except dividends, which the data does not support). **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). See [Results](#results).
+> **Status:** Phases 1–4 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58).
+
+![Growth of $1, 2010–2023](images/equity_curve.png)
+
+---
+
+## Results
+
+2010–2023, walk-forward, after 10 bps costs, price returns:
+
+| | CAGR | Volatility | Sharpe | Max drawdown | Turnover / yr | t-stat vs S&P | 2023 |
+|---|---|---|---|---|---|---|---|
+| **Strategy** | **12.2%** | 20.4% | **0.52** | −33.0% | 453% | 0.58 | 11.5% |
+| Equal-weight top 50 | 10.1% | 16.8% | 0.48 | −31.1% | 67% | −1.46 | 23.1% |
+| Cap-weight top 50 | 11.5% | 17.9% | 0.53 | −30.0% | 22% | 0.51 | 37.2% |
+| Cap-weight S&P 500 (index proxy) | 11.1% | 17.5% | 0.52 | −33.6% | 8% | — | 25.7% |
+
+The S&P 500 proxy tracks the real index closely: 25.6% vs 24.2% before costs in 2023, and 11.1% vs about 10.9% a year over 2010–2023.
+
+### Year by year
+
+The strategy beat the S&P 500 proxy in 8 of 14 years, but its bad years (2010, 2016, 2023) were large.
+
+![Strategy minus S&P 500 by year](images/yearly_excess.png)
+
+### Risk over time
+
+Drawdowns are similar to the index's, but the strategy's rolling 3-year Sharpe has fallen behind since 2022.
+
+![Drawdowns and rolling Sharpe](images/drawdown_rolling_sharpe.png)
+
+### Where the return comes from
+
+Each layer was added one at a time. Momentum, the optimiser and the ARIMA views each move the Sharpe ratio by 0.03 or less, while turnover rises nearly sevenfold.
+
+![Sharpe and turnover by layer](images/layers.png)
+
+### How sensitive the result is
+
+Across 13 variants of the settings and costs, the Sharpe ranges from 0.43 to 0.60. None is statistically significant (best t-statistic ≈ 1.2).
+
+![Sharpe across settings](images/sensitivity.png)
+
+### Transaction costs
+
+The strategy trades a lot, so costs matter: its edge over the S&P 500 proxy disappears at about **45 bps** per trade.
+
+![Excess return by transaction cost](images/cost_breakeven.png)
+
+### Full S&P 500 universe
+
+Running the same momentum selection on all ~500 members made results **worse**. The strategy's Sharpe fell to 0.29, and classic top-decile momentum got 0.33, against 0.47 for equal-weight S&P 500. Large-cap US momentum was a weak factor in 2010–2023.
+
+![Top-50 vs full S&P 500](images/universe_comparison.png)
+
+### Reducing turnover
+
+Moving only 50% of the way to the target each quarter halves turnover (453% → 225%) and raises the Sharpe to 0.58 (t-statistic 1.15). No-trade bands barely help, because most trades are whole-position swaps. This was found after testing several variants, so it needs confirming on fresh data.
+
+![Turnover vs Sharpe](images/turnover_tradeoff.png)
+
+### 2023 test year
+
+Momentum at the end of 2022 pointed towards energy and defensive stocks, while 2023 was led by mega-cap tech: 11.5% for the strategy against 25.7% for the S&P proxy.
+
+![2023 backtest](images/backtest_2023.png)
 
 ---
 
@@ -17,35 +82,25 @@ Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA 
 1. **Data cleaning.** Removes exchange suffixes from tickers (`AAPL UW Equity` → `AAPL`). Drops blank rows (28% of the raw file) *before* de-duplicating. When a company has two listings with different prices, keeps the one named in that date's S&P 500 snapshot.
 2. **Point-in-time universe.** The 50 largest stocks that were **in the S&P 500 on that date**, taken from the quarterly constituent snapshots. This avoids survivorship bias.
 3. **Momentum selection.** Ranks the universe by 12-1 month momentum (12-month return, skipping the latest month), excludes overbought stocks (RSI > 70), and keeps the top 25.
-4. **ARIMA views.** `auto_arima` on each stock's quarterly **log returns**, with no seasonal term and the intercept forced on. The next-quarter forecast becomes that stock's Black-Litterman view. Forecasts are fitted in parallel and cached.
+
+   ![Momentum indicators](images/momentum_indicators.png)
+
+4. **ARIMA views.** `auto_arima` on each stock's quarterly **log returns**, with no seasonal term and the intercept forced on. The next-quarter forecast becomes the stock's Black-Litterman view. The 95% intervals are wide, so the views carry little information. Forecasts are fitted in parallel and cached.
+
+   ![ARIMA forecasts](images/arima_forecasts.png)
+
 5. **Black-Litterman.** A market-cap-implied prior blended with the ARIMA views, all in annual excess returns, using a Ledoit-Wolf shrunk covariance. The optimiser maximises Sharpe, long-only, with at most 20% in any one stock.
+
+   ![Black-Litterman allocation](images/black_litterman_allocation.png)
+
 6. **Backtest.** Holdings drift with prices for one quarter, then the process re-runs using only data up to the next rebalance date. Every portfolio, benchmarks included, pays 10 bps per unit traded.
-
-### Results
-
-2010–2023, after 10 bps costs, price returns:
-
-| | CAGR | Volatility | Sharpe | Max drawdown | Turnover / yr | t-stat vs S&P | 2023 |
-|---|---|---|---|---|---|---|---|
-| **Strategy** | **12.2%** | 20.4% | **0.52** | −33.0% | 453% | 0.58 | 11.5% |
-| Equal-weight top 50 | 10.1% | 16.8% | 0.48 | −31.1% | 67% | −1.46 | 23.1% |
-| Cap-weight top 50 | 11.5% | 17.9% | 0.53 | −30.0% | 22% | 0.51 | 37.2% |
-| Cap-weight S&P 500 (index proxy) | 11.1% | 17.5% | 0.52 | −33.6% | 8% | — | 25.7% |
-
-The S&P 500 proxy tracks the real index closely: 25.6% vs 24.2% before costs in 2023, and 11.1% vs about 10.9% a year over 2010–2023.
-
-**What the analysis shows**
-
-- **No significant edge.** The strategy earns about 1.6% a year more than the S&P proxy, but with more volatility and the same Sharpe ratio. A t-statistic of 0.58 is well short of the ~2 needed to rule out luck.
-- **No layer clearly adds value.** Adding momentum selection, then Black-Litterman, then ARIMA views moves the Sharpe ratio from 0.48 to 0.49, 0.49 and 0.52, while turnover rises from 67% to 453% a year.
-- **The result is not fragile, just unremarkable.** Across 13 setting and cost variants the Sharpe ranges from 0.43 to 0.60, the best t-statistic is about 1.2, and the advantage disappears at costs of about 45 bps.
-- **The two halves agree.** Sharpe 0.58 vs 0.53 for the S&P proxy in 2010–2016, and 0.50 vs 0.52 in 2017–2023.
 
 ### Files
 
 | File | Purpose |
 |------|---------|
-| `main.ipynb` | The full pipeline, backtests, analysis and findings (about 5 minutes on the first run, 2 minutes once the ARIMA cache exists) |
+| `main.ipynb` | The full pipeline, backtests, analysis and findings (a few minutes; faster once the ARIMA cache exists) |
+| `images/` | Charts exported by the notebook and used in this README |
 | `requirements.txt` | Package versions the notebook was verified with |
 | `archive/` | Phase 1 notebooks, kept for reference |
 | `cache/` | ARIMA forecast cache, created by the notebook (not committed) |
@@ -131,8 +186,59 @@ Status key: ⬜ To do · 🔄 In progress · ✅ Done
 
 **Progress: 5 / 6 done, 1 blocked.**
 
-### Possible next steps
+### Phase 4: Extensions ✅ Complete
 
-- Get total-return data to complete 3.1.
-- Test momentum on the full S&P 500 rather than the 50 largest stocks; momentum is usually stronger outside mega-caps.
-- Lower turnover, for example by only trading when weights move by more than a threshold.
+| # | Task | Outcome | Status |
+|---|------|---------|--------|
+| 4.1 | Run momentum on the full S&P 500 | All ~500 members, point-in-time. Results got worse: strategy Sharpe 0.29, classic top-decile momentum 0.33, against 0.47 for equal-weight S&P 500. Added an equal-weight S&P 500 benchmark. | ✅ Done |
+| 4.2 | Reduce turnover | Added no-trade bands and partial rebalancing to the backtest engine. Partial rebalancing (50%) halves turnover and lifts the Sharpe to 0.58 (t-statistic 1.15). Bands barely help, because trades are whole-position swaps. | ✅ Done |
+| 4.3 | Visual report | 12 charts, built on one colour-blind-checked palette with a fixed colour per portfolio, exported to `images/` and shown in this README. | ✅ Done |
+| 3.1 | Dividends (carried over) | Still blocked. The free alternative (Yahoo Finance) has no data for most delisted companies, so it would cover the survivors only and reintroduce survivorship bias. Needs a point-in-time total-return source (CRSP, or Bloomberg `TOT_RETURN_INDEX_GROSS_DVDS`). | ⛔ Blocked (no data) |
+
+---
+
+## Next steps: ideas
+
+Ideas for where to take the project next, grouped by theme. The **Value** column is a rough guess at how much each would teach or change.
+
+### Better data
+| Idea | Why | Value |
+|---|---|---|
+| Total-return data (CRSP or Bloomberg) | Unblocks 3.1 and removes special-dividend artifacts such as KDP's −82% "crash" in 2018 | High |
+| Extend the backtest back to 2003 | The data starts in 2000; 2003 is the earliest date with full lookback windows. It would add the 2008 crisis and the 2009 rebound, when momentum famously crashed | High |
+| Sector classifications (GICS) | Enables sector-neutral momentum and sector caps; in 2023 the strategy was effectively a sector bet against tech | Medium |
+
+### Signal research
+| Idea | Why | Value |
+|---|---|---|
+| Multi-factor model using the data's own `EPS` and `BOOK_VAL_PER_SH` | Value and momentum tend to be negatively correlated, so combining them usually gives a smoother result than either alone | High |
+| Volatility-scaled momentum | Scaling exposure down when momentum is volatile is documented to reduce momentum crashes | High |
+| Market trend filter | Hold cash or the index when the S&P 500 is below its 200-day average, to avoid momentum's worst periods | Medium |
+| Other momentum definitions | 6-month, 52-week-high or residual (beta-adjusted) momentum; check whether 12-1 is the weak link | Medium |
+| Monthly rebalancing | Momentum signals decay quickly; quarterly may be too slow, though costs rise | Medium |
+
+### Forecasting and portfolio construction
+| Idea | Why | Value |
+|---|---|---|
+| Test the ARIMA forecasts directly | Measure the information coefficient and hit rate of the forecasts before using them as views. The wide intervals suggest they are close to noise | High |
+| Set view confidence from forecast accuracy (Idzorek) | Currently every view gets the same weight relative to the prior; weaker forecasts should count for less | Medium |
+| Replace ARIMA with a cross-sectional model | For example gradient boosting on momentum, value and volatility features to rank stocks, instead of 25 separate time-series models | Medium |
+| Turnover penalty inside the optimiser | Trade only when the expected gain beats the cost, rather than adjusting after the fact | Medium |
+| Compare other allocators | Minimum-variance, risk parity or hierarchical risk parity on the same momentum picks | Low |
+
+### Making the results trustworthy
+| Idea | Why | Value |
+|---|---|---|
+| Out-of-sample confirmation | Fix the best settings (such as partial rebalancing) now and test them only on new data from 2024 onwards | High |
+| Deflated Sharpe ratio and bootstrap confidence intervals | Correct for the many variants tested: the best Sharpe out of many tries is weaker evidence than it looks | High |
+| Walk-forward parameter selection | Let the backtest choose its settings using only past data at each date, instead of fixing them up front | Medium |
+| Random-portfolio benchmark | Compare against thousands of random 25-stock portfolios to see where the strategy ranks by luck alone | Medium |
+
+### Engineering
+| Idea | Why | Value |
+|---|---|---|
+| Move the code into a Python package (`src/`) with unit tests | The Black-Litterman maths and backtest engine are where the original bugs were; tests would stop regressions | High |
+| Synthetic sample dataset | Lets anyone run the notebook end-to-end without Bloomberg data | High |
+| Continuous integration (GitHub Actions) | Run the tests and a small backtest on every push | Medium |
+| Config file instead of notebook constants | Run experiments from the command line and log each run's settings and results | Medium |
+| Interactive dashboard (Streamlit or Plotly) | Let readers change settings and see the backtest update | Low |
