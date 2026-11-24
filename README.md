@@ -2,7 +2,7 @@
 
 A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in quarterly walk-forward backtests (2023, and 2010–2023), after transaction costs, against market benchmarks.
 
-> **Status:** Phases 1–6 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). **Phase 5** shows why: [signal research](#signal-research-phase-5) finds no momentum premium in the S&P 500 over 2003–2023, so there was little for any portfolio to capture. **Phase 6** fixes the [portfolio construction](#portfolio-construction-phase-6) (turnover 453% → 28% a year, tracking error under control), which leaves the strategy earning about the benchmark: the signals carry almost no information.
+> **Status:** Phases 1–7 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). **Phase 5** shows why: [signal research](#signal-research-phase-5) finds no momentum premium in the S&P 500 over 2003–2023, so there was little for any portfolio to capture. **Phase 6** fixes the [portfolio construction](#portfolio-construction-phase-6) (turnover 453% → 28% a year, tracking error under control), which leaves the strategy earning about the benchmark: the signals carry almost no information. **Phase 7** tests [better momentum signals](#momentum-variants-and-risk-forecasts-phase-7): volatility management transforms the momentum factor's crash risk, but neither it nor residual momentum helps the long-only top-50 portfolio.
 
 ![Growth of $1, 2010–2023](images/equity_curve.png)
 
@@ -134,14 +134,50 @@ and $\kappa = 1$ (trades charged at their real cost).
   7.6–9.4%, and drawdowns within 1.3 points of the benchmark's (−30.0%). The portfolios hold 44–48 names, and 86–89% of their active risk is stock-specific.
 * **Which exposes how little the alphas are worth:** +0.1% to +0.3% a year, none significant, and +0.1%,
   −0.1% and +0.2% over 2005–2023.
-* **The risk model underestimates active risk.** Realised tracking error divided by the forecast (the bias
+* **The optimised portfolios were riskier than forecast.** Realised tracking error divided by the forecast (the bias
   statistic) is 1.17 for the historical mean, at the edge of the range expected from an accurate model
-  (0.81–1.19), and 1.32–1.57 for the other two. An equally weighted 3-year window reacts slowly.
+  (0.81–1.19), and 1.32–1.57 for the other two. Phase 7 finds why: not the risk model itself, which is
+  accurate for random portfolios, but misalignment between the alpha and the risk model.
 * **Sensitivity** (every setting reported): more active risk adds a little return for the historical mean
   (+1.3% at 3.9% tracking error, t 1.20) and none for momentum; a higher trading penalty cuts turnover to
   11–15% at no cost in return.
 
 ![Sensitivity to risk aversion and trading penalty](images/phase6_sensitivity.png)
+
+---
+
+## Momentum variants and risk forecasts (Phase 7)
+
+[`momentum-variants-and-risk.ipynb`](momentum-variants-and-risk.ipynb) tests the two standard improvements to
+momentum and diagnoses Phase 6's low risk forecasts.
+
+**Volatility-managed momentum** (Barroso & Santa-Clara 2015, their settings: 12% target, 6-month window, at
+most 2×) on the S&P 500 top-minus-bottom momentum quintile, 245 months, before costs:
+
+| | Return / yr | Sharpe (t) | Max drawdown | Worst month | Skewness |
+|---|---|---|---|---|---|
+| 12-1 momentum, raw | −1.0% | −0.05 (−0.23) | −71.8% | −33.6% | −0.89 |
+| 12-1 momentum, volatility-managed | +4.0% | 0.31 (1.50) | −29.5% | −11.3% | +0.45 |
+| Residual momentum, raw | +1.0% | 0.09 (0.39) | −33.2% | −13.7% | −0.25 |
+| Residual momentum, volatility-managed | +2.4% | 0.19 (0.89) | −35.4% | −12.8% | +0.19 |
+
+![Volatility-managed momentum](images/phase7_vol_managed_momentum.png)
+
+* **Volatility management removes the momentum crash** (−71.8% → −29.5% drawdown, worst month −33.6% → −11.3%),
+  reproducing the paper; the higher return is not significant (t 1.50).
+* **Residual momentum** (Blitz, Huij & Martens 2011; market factor only) is steadier than 12-1 momentum in the
+  top 50 (3-month IC positive in all three sub-periods; quintile spread +4.6% a year, t 1.62) but has no premium
+  in the full S&P 500 and adds nothing once 12-1 momentum is controlled for.
+* **Neither helps the long-only top-50 portfolio:** through the Phase 6 optimiser both earn 0.0% a year
+  against the cap-weighted top 50. There is no momentum information there to scale.
+* **The risk model was accurate all along.** Exponential weighting, Phase 6's suggested fix, makes the
+  forecasts slightly worse. The model's bias statistic is 0.98 for 11,200 random active portfolios and 0.98
+  for specific risk; only optimised portfolios were under-forecast, because the optimiser bets along the alpha,
+  which the model had no factor for. Adding the alpha as a factor (Lee & Stefek 2008) brings the
+  historical-mean portfolio from 1.17 to 1.10, within the range of an accurate model. Momentum stays at 1.52,
+  driven by two extreme quarters (Q3 2020, +5.3 standard deviations; Q3 2015, −4.9).
+
+![Bias statistics](images/phase7_bias.png)
 
 ---
 
@@ -176,6 +212,7 @@ Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA 
 | `main.ipynb` | The full pipeline, backtests, analysis and findings (a few minutes; faster once the ARIMA cache exists) |
 | `signal-research.ipynb` | Phase 5: signal tests (IC, quintiles, Fama-MacBeth) and Grinold-alpha portfolios (about 1 minute once `main.ipynb` has built the ARIMA cache) |
 | `portfolio-construction.ipynb` | Phase 6: risk model, benchmark-relative optimiser, forecast vs realised risk, sensitivity (about 4 minutes) |
+| `momentum-variants-and-risk.ipynb` | Phase 7: residual and volatility-managed momentum, risk-forecast diagnostics, alpha-aligned risk model (about 4 minutes) |
 | `mts/` | Package shared by the Phase 5 and 6 notebooks: `data` (cleaning, point-in-time universe), `baseline` (the `main.ipynb` strategy, same logic), `backtest`, `signals`, `risk`, `optimize`, `plotting`, `config` |
 | `tests/` | Unit tests on synthetic data (Black-Litterman identities, Grinold alpha, point-in-time IC, risk model, optimiser constraints); no Bloomberg data needed |
 | `results/` | Tables behind every Phase 5 and 6 number in this README, as CSV |
@@ -299,11 +336,21 @@ Status key: ⬜ To do · 🔄 In progress · ✅ Done
 | 6.3 | Check the risk model's forecasts | Bias statistic 1.17–1.57: realised tracking error is higher than forecast | ✅ Done |
 | 6.4 | Package and tests | `research.py` replaced by the `mts/` package; 20 unit tests on synthetic data; every Phase 5 and 6 table exported to `results/`. The Phase 5 notebook gives the same numbers on the package | ✅ Done |
 
+### Phase 7: Momentum variants and risk forecasts ✅ Complete
+
+| # | Task | Outcome | Status |
+|---|------|---------|--------|
+| 7.1 | Residual momentum | 36-month market-model residuals, 12-1 window, scaled by residual volatility. Steadier than 12-1 momentum in the top 50, no premium in the S&P 500 | ✅ Done |
+| 7.2 | Volatility-managed momentum | Momentum factor: drawdown −71.8% → −29.5%, Sharpe −0.05 → 0.31 (t 1.50). No effect in the long-only portfolio | ✅ Done |
+| 7.3 | Exponentially weighted risk model | Half-lives of 126, 63 and 42 days make the forecasts slightly worse; it was the wrong diagnosis in Phase 6 | ✅ Done |
+| 7.4 | Diagnose the risk forecasts | Accurate for random portfolios (0.98) and specific risk (0.98); the alpha-aligned model fixes the historical-mean portfolio (1.17 → 1.10); momentum's error comes from two extreme quarters | ✅ Done |
+| 7.5 | Code | `risk.add_alpha_factor`, exponential weights, `signals.residual_momentum`, `signals.vol_scale`, `backtest.bias_statistic`; 29 unit tests in all | ✅ Done |
+
 ---
 
 ## Next steps: ideas
 
-Phase 5 covered the signal research in section 2 below (evaluating each signal, the historical-mean follow-up, extending back to 2005) and replaced Idzorek-style view confidence with Grinold alphas. Phase 6 covered section 4 (benchmark-relative optimisation with a tracking-error budget and a turnover penalty, with the transfer coefficient reported) and the package and unit tests in section 7. What remains is mainly **better signals** (residual and volatility-scaled momentum, section 2) and **a better risk model** (exponentially weighted, so the forecasts stop underestimating risk).
+Phase 5 covered the signal research in section 2 below (evaluating each signal, the historical-mean follow-up, extending back to 2005) and replaced Idzorek-style view confidence with Grinold alphas. Phase 6 covered section 4 (benchmark-relative optimisation with a tracking-error budget and a turnover penalty, with the transfer coefficient reported) and the package and unit tests in section 7. Phase 7 tested residual and volatility-managed momentum (section 2) and diagnosed the risk forecasts: the risk model is accurate, and aligning it with the alpha fixes the forecasts for the historical-mean strategy. What remains is mainly **signals with real information in large caps**, which none tested so far have, and a **factor attribution** of what little active return there is (section 3).
 
 ### What a re-check of the results found
 
@@ -332,8 +379,8 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 |---|---|
 | Evaluate each signal on its own before building portfolios | Standard practice: IC, IC decay at 1, 3, 6 and 12 months, quintile long-short spreads, and how often the signal's ranking changes |
 | Follow up the historical-mean IC | Control for size and sector, and test 2003–2009, to see whether it is real skill or just the mega-cap tech decade |
-| Other momentum definitions | 6-month, 52-week-high or residual (beta-adjusted) momentum; check whether 12-1 is the weak link |
-| Volatility-scaled momentum | Scaling exposure down when momentum is volatile is documented to reduce momentum crashes |
+| ~~Other momentum definitions~~ | Done: 6-1 and 52-week high (Phase 5), residual momentum (Phase 7); none has a premium in the S&P 500 |
+| ~~Volatility-scaled momentum~~ | Done in Phase 7: removes the factor's crashes, adds nothing to the long-only top-50 portfolio |
 | Multi-factor model with book-to-price | Value and momentum tend to be negatively correlated, so combining them usually gives a smoother result than either alone. `EPS` is empty in the data, so value is book-to-price only (lagged 3 months; see Phase 5) |
 | Market trend filter | Hold cash or the index when the S&P 500 is below its 200-day average, to avoid momentum's worst periods |
 | Monthly rebalancing | Momentum signals decay quickly; quarterly may be too slow, though costs rise |
@@ -352,7 +399,7 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 | ~~Mean-variance against the benchmark with a tracking-error target~~ | Done in Phase 6 |
 | ~~Set view confidence from forecast accuracy (Idzorek)~~ | Superseded by Grinold alphas in Phase 5 |
 | ~~Turnover penalty inside the optimiser~~ | Done in Phase 6 |
-| Exponentially weighted risk model | Phase 6's equally weighted 3-year model underestimates active risk (bias statistic 1.17–1.57) |
+| ~~Exponentially weighted risk model~~ | Tested in Phase 7: it does not help; the cause was alpha–risk misalignment, fixed with an alpha factor |
 | Compare other allocators | Minimum-variance, risk parity or hierarchical risk parity on the same picks |
 
 ### 5. Making the results trustworthy

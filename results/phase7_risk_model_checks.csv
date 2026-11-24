@@ -1,0 +1,4 @@
+,random active portfolios,n portfolios,specific risk,n stock-quarters
+"Statistical, equal weights",0.9793054351168938,11200.0,0.984714573058191,2769.0
+"Statistical, half-life 63 days",1.0597332648255313,11200.0,1.1122225773733758,2769.0
+Ledoit-Wolf sample covariance,0.9619662108007716,11200.0,,0.0

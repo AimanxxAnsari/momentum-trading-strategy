@@ -65,12 +65,16 @@ def build_panel(dates, universe_size: int = 10_000) -> pd.DataFrame:
     return pd.concat(rows).rename_axis("ticker").reset_index().set_index(["date", "ticker"])
 
 
-def load_panel() -> pd.DataFrame:
-    """The monthly panel for 2003-2023, built once and cached in cache/panel_monthly.pkl."""
-    path = C.CACHE_DIR / "panel_monthly.pkl"
+def load_panel(residual_momentum: bool = False) -> pd.DataFrame:
+    """The monthly panel for 2003-2023, built once and cached in cache/. With residual_momentum=True
+    it also has `res_mom` (Phase 7), cached separately."""
+    path = C.CACHE_DIR / ("panel_monthly_p7.pkl" if residual_momentum else "panel_monthly.pkl")
     if path.exists():
         return pd.read_pickle(path)
-    panel = build_panel(data.period_ends("2003-01-01", "2023-12-31", "M"))
+    if residual_momentum:
+        panel = add_residual_momentum(load_panel())
+    else:
+        panel = build_panel(data.period_ends("2003-01-01", "2023-12-31", "M"))
     panel.to_pickle(path)
     return panel
 
@@ -155,3 +159,97 @@ def transfer_coefficient(weights: pd.Series, w_bench: pd.Series, alpha: pd.Serie
     idx = alpha.index
     act = weights.reindex(idx).fillna(0) - w_bench.reindex(idx).fillna(0)
     return np.corrcoef(act * vol.reindex(idx), alpha / vol.reindex(idx))[0, 1]
+
+
+# -- Phase 7: residual momentum and volatility-managed momentum ---------------------
+
+def monthly_prices() -> pd.DataFrame:
+    """Month-end prices; a stock that stops trading keeps its last price."""
+    P = data.prices()
+    month_ends = pd.Series(P.index, index=P.index).groupby(P.index.to_period("M")).max().values
+    return P.loc[month_ends].ffill()
+
+
+def market_monthly() -> pd.Series:
+    """Cap-weighted monthly return of the point-in-time S&P 500, indexed by the month-end it ends on.
+    Weights are market caps at the start of the month; members are those in the latest snapshot."""
+    Pm, M = monthly_prices(), data.mcap()
+    R = Pm.pct_change(fill_method=None)
+    out = {}
+    for prev, cur in zip(Pm.index[:-1], Pm.index[1:]):
+        caps = data.universe(prev, 10_000)
+        r = R.loc[cur, caps.index]
+        ok = r.notna()
+        out[cur] = (caps[ok] * r[ok]).sum() / caps[ok].sum()
+    return pd.Series(out)
+
+
+def residual_momentum(R: pd.DataFrame, m: pd.Series, skip: int = 1, formation: int = 11,
+                      min_obs: int = 24) -> pd.Series:
+    """Blitz, Huij & Martens (2011), with the market as the only factor.
+
+    R: monthly stock returns over the estimation window (e.g. 36 months, oldest first); m: market
+    returns on the same months. Each stock's returns are regressed on the market; residual momentum is
+    the sum of its residuals over the `formation` months before the last `skip` months, divided by
+    their standard deviation (so it measures how consistently the stock beat its beta, not by how much)."""
+    m = m.reindex(R.index)
+    mask = R.notna().values & m.notna().values[:, None]     # months with both a stock and a market return
+    r = np.where(mask, R.values, 0.0)
+    mv = np.nan_to_num(m.values)[:, None]
+    n = mask.sum(axis=0)
+    mm = (mv * mask).sum(axis=0) / np.maximum(n, 1)
+    rm = r.sum(axis=0) / np.maximum(n, 1)
+    dm, dr = (mv - mm) * mask, (r - rm) * mask
+    beta = (dm * dr).sum(axis=0) / np.where((dm ** 2).sum(axis=0) > 0, (dm ** 2).sum(axis=0), np.nan)
+    alpha = rm - beta * mm
+    resid = np.where(mask, r - alpha - beta * mv, np.nan)
+    window = resid[-(formation + skip):len(resid) - skip]
+    s = np.nanstd(window, axis=0, ddof=1)
+    score = np.nansum(window, axis=0) / np.where(s > 0, s, np.nan)
+    score[(n < min_obs) | (np.isfinite(window).sum(axis=0) < formation - 2)] = np.nan
+    return pd.Series(score, index=R.columns)
+
+
+def add_residual_momentum(panel: pd.DataFrame, window: int = 36) -> pd.DataFrame:
+    """Adds `res_mom` (residual 12-1 momentum, 36-month market-model regression) to the panel."""
+    Pm = monthly_prices()
+    R = Pm.pct_change(fill_method=None)
+    mkt = market_monthly()
+    pos = {d: i for i, d in enumerate(Pm.index)}
+    parts = []
+    for d, g in panel.groupby(level="date"):
+        i = pos[d]
+        tick = g.index.get_level_values("ticker")
+        Rw = R.iloc[max(i - window + 1, 0):i + 1][tick]
+        s = residual_momentum(Rw, mkt.reindex(Rw.index))
+        parts.append(pd.Series(s.values, index=g.index))
+    out = panel.copy()
+    out["res_mom"] = pd.concat(parts)
+    return out
+
+
+def long_short_daily(panel: pd.DataFrame, signal: str, n: int = 5) -> pd.Series:
+    """Daily return of the top-minus-bottom quantile portfolio (equal-weighted, formed at each
+    month-end in `panel`, held to the next). A stock that stops trading earns 0 from then on."""
+    P = data.prices()
+    daily = P.pct_change(fill_method=None)
+    dates = sorted(panel.index.get_level_values("date").unique())
+    ends = dates[1:] + [P.index[-1]]
+    pieces = []
+    for d, e in zip(dates, ends):
+        g = panel.loc[d, signal].dropna()
+        if len(g) < 5 * n:
+            continue                                  # signal not available yet
+        q = pd.qcut(g.rank(method="first"), n, labels=False)
+        top, bottom = g.index[q == n - 1], g.index[q == 0]
+        r = daily.loc[d:e].iloc[1:]
+        pieces.append(r[top].fillna(0).mean(axis=1) - r[bottom].fillna(0).mean(axis=1))
+    return pd.concat(pieces)
+
+
+def vol_scale(daily: pd.Series, at, target: float = 0.12, window: int = 126, cap: float = 2.0) -> float:
+    """Barroso & Santa-Clara (2015): exposure = target volatility / realised volatility of the
+    strategy over the last `window` days before `at`, capped at `cap`."""
+    past = daily.loc[:at].iloc[-window:]
+    realised = np.sqrt((past ** 2).mean() * C.TRADING_DAYS)
+    return float(min(target / realised, cap)) if realised > 0 else np.nan

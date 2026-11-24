@@ -74,3 +74,21 @@ def active_stats(curves: dict, benchmark: str) -> pd.DataFrame:
     """Active return, tracking error, IR and t-statistic of every curve against one benchmark curve."""
     p = performance(curves, benchmark)
     return p[["Excess vs S&P", "Tracking error", "IR", "t-stat"]].rename(columns={"Excess vs S&P": "Active return"})
+
+
+def bias_statistic(curve: pd.Series, bench: pd.Series, forecast_te: dict, dates) -> pd.DataFrame:
+    """Forecast vs realised active risk, one row per holding period.
+
+    Each period's realised active return (portfolio minus benchmark, from the value curves) is divided
+    by the tracking error forecast on its formation date, scaled to the period length. If forecasts are
+    accurate, these standardised returns have a standard deviation (the bias statistic) of about 1;
+    with T periods, an accurate model gives 1 +/- 1.96 * sqrt(1 / (2T)) 95% of the time."""
+    ends = list(dates[1:]) + [curve.index[-1]]
+    rows = {}
+    for f, g in zip(dates, ends):
+        horizon = (g - f).days / 365.25
+        rows[f] = {"realised active return": curve.loc[g] / curve.loc[f] - bench.loc[g] / bench.loc[f],
+                   "forecast TE (period)": forecast_te[f] * np.sqrt(horizon)}
+    out = pd.DataFrame(rows).T
+    out["standardised"] = out["realised active return"] / out["forecast TE (period)"]
+    return out

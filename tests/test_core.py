@@ -202,3 +202,107 @@ def test_snapshot_filenames_with_copy_suffix_parse():
     assert data.parse_snapshot_date("SPX as of Sep 30 20201.xlsx") == pd.Timestamp("2020-09-30")
     with pytest.raises(ValueError):
         data.parse_snapshot_date("constituents.xlsx")
+
+
+# -- Phase 7 -------------------------------------------------------------------------------
+
+def test_ewma_weights_halve_every_half_life_and_sum_to_one():
+    w = risk.ewma_weights(100, half_life=10)
+    assert w.sum() == pytest.approx(1)
+    assert w[-11] / w[-1] == pytest.approx(0.5)
+    np.testing.assert_allclose(risk.ewma_weights(5, None), np.full(5, 0.2))
+
+
+def test_weighted_risk_model_approaches_the_equal_weighted_one_for_long_half_lives():
+    rets, _ = simulated_returns()
+    eq = risk.fit_pca(rets, n_factors=2)
+    long_hl = risk.fit_pca(rets, n_factors=2, half_life=1e9)
+    np.testing.assert_allclose(long_hl.cov, eq.cov, rtol=1e-4)
+
+
+def test_ewma_risk_model_tracks_a_volatility_increase():
+    r = np.random.default_rng(10)
+    calm = r.normal(0, 0.01, size=(700, 20))
+    wild = r.normal(0, 0.03, size=(56, 20))
+    rets = pd.DataFrame(np.vstack([calm, wild]))
+    eq, ew = risk.fit_pca(rets, 2), risk.fit_pca(rets, 2, half_life=21)
+    assert ew.total_vol.mean() > 2 * eq.total_vol.mean()
+
+
+def test_residual_momentum_ignores_market_moves_and_rewards_consistent_outperformance():
+    r = np.random.default_rng(11)
+    T = 36
+    m = pd.Series(r.normal(0.01, 0.05, T))
+    noise = r.normal(0, 0.02, (T, 3))
+    beta_only = 1.2 * m + noise[:, 0]
+    winner = 1.0 * m + noise[:, 1] + np.r_[np.zeros(T - 12), np.full(11, 0.03), 0]   # beats beta in months t-11..t-1
+    loser = 0.8 * m + noise[:, 2] - np.r_[np.zeros(T - 12), np.full(11, 0.03), 0]
+    R = pd.DataFrame({"beta_only": beta_only, "winner": winner, "loser": loser})
+    s = signals.residual_momentum(R, m)
+    assert s["winner"] > s["beta_only"] > s["loser"]
+
+
+def test_residual_momentum_is_centred_on_zero_for_pure_market_exposure():
+    # A strongly rising market in the formation window: raw momentum would favour high betas,
+    # residual momentum should not. Each score is sum/sd of 11 residuals, so its sd is about sqrt(11).
+    r = np.random.default_rng(12)
+    T, n = 36, 500
+    m = pd.Series(np.r_[r.normal(0, 0.04, T - 12), r.normal(0.05, 0.04, 12)])
+    betas = r.uniform(0.5, 1.5, n)
+    R = pd.DataFrame(np.outer(m, betas) + r.normal(0, 0.03, (T, n)))
+    s = signals.residual_momentum(R, m)
+    assert abs(s.mean()) < 3 * np.sqrt(11) / np.sqrt(n)
+    assert abs(np.corrcoef(s, betas)[0, 1]) < 0.15
+
+
+def test_vol_scale_targets_volatility_and_respects_the_cap():
+    idx = pd.date_range("2020-01-01", periods=300, freq="B")
+    calm = pd.Series(0.06 / np.sqrt(252), index=idx)             # constant |return| -> 6% realised
+    assert signals.vol_scale(calm, idx[-1], target=0.12, cap=5) == pytest.approx(2.0)
+    assert signals.vol_scale(calm, idx[-1], target=0.12, cap=1.5) == pytest.approx(1.5)
+
+
+def test_residual_momentum_skips_months_without_a_market_return():
+    r = np.random.default_rng(13)
+    m = pd.Series(r.normal(0.01, 0.05, 36))
+    R = pd.DataFrame(np.outer(m, [1.0, 1.2]) + r.normal(0, 0.02, (36, 2)), columns=["a", "b"])
+    full = signals.residual_momentum(R, m)
+    m_gap = m.copy()
+    m_gap.iloc[0] = np.nan                       # e.g. the first month of the data
+    gap = signals.residual_momentum(R, m_gap)
+    assert gap.notna().all()
+    np.testing.assert_allclose(gap, signals.residual_momentum(R.iloc[1:], m.iloc[1:]))
+    assert full.notna().all()
+
+
+def test_alpha_factor_captures_a_hidden_common_factor():
+    # Returns have a factor along x that a 1-factor model misses; after adding x as a factor, the
+    # forecast variance of a portfolio along x matches the sample variance.
+    r = np.random.default_rng(14)
+    n, T = 30, 1500
+    mkt = r.normal(0, 0.01, T)
+    x = pd.Series(r.normal(size=n), index=[f"s{i}" for i in range(n)])
+    hidden = r.normal(0, 0.004, T)
+    R = np.outer(mkt, np.ones(n)) + np.outer(hidden, x.values) + r.normal(0, 0.01, (T, n))
+    rets = pd.DataFrame(R, columns=x.index)
+    rm = risk.fit_pca(rets, n_factors=1)
+    aug = risk.add_alpha_factor(rm, rets, x)
+    xp = x.values - rm.B @ (rm.B.T @ x.values)
+    u = xp / np.linalg.norm(xp)
+    sample = np.var(R @ u, ddof=1) * 252
+    assert u @ aug.cov @ u == pytest.approx(sample, rel=0.02)
+    assert u @ rm.cov @ u < 0.8 * sample             # the unaligned model underestimates it
+    assert aug.B.shape[1] == 2
+
+
+def test_bias_statistic_is_one_when_forecasts_are_right():
+    from mts import backtest as bt
+    r = np.random.default_rng(15)
+    dates = list(pd.date_range("2000-03-31", periods=400, freq="QE"))
+    te = 0.04
+    active = r.normal(0, te * np.sqrt(0.25), len(dates))
+    bench = pd.Series(1.0, index=dates + [dates[-1] + pd.offsets.QuarterEnd()])
+    curve = pd.Series(np.r_[1.0, np.cumprod(1 + active)], index=bench.index)
+    # curve returns relative to a flat benchmark: per-period return = active (compounded levels)
+    b = bt.bias_statistic(curve, bench, {d: te for d in dates}, dates)
+    assert b["standardised"].std() == pytest.approx(1, abs=0.1)
