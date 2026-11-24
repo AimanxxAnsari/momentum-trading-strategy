@@ -99,14 +99,18 @@ class Registry:
 
     # -- strategy constructors -----------------------------------------------------------------
     def baseline(self, n_select=25, rsi_max=70, max_weight=0.20, tau=0.05, cov="ledoit_wolf", use_views=True,
-                 weighting="black_litterman", full=False, view_key="views"):
+                 weighting="black_litterman", full=False, view_key="views", tbill_views=False):
         def weights(f):
             c = (self.ctx_full if full else self.ctx)[f]
             sel = BL.select_stocks(c["signals"], n_select, rsi_max)
             if weighting == "equal":
                 return pd.Series(1 / len(sel), index=sel.index)
+            rf = None
+            if tbill_views:
+                from . import factors
+                rf = factors.tbill_annual(f)
             return BL.black_litterman(f, list(sel.index), c["universe"], c[view_key], tau=tau,
-                                      max_weight=max_weight, cov=cov, use_views=use_views)["weight"]
+                                      max_weight=max_weight, cov=cov, use_views=use_views, risk_free=rf)["weight"]
         return weights
 
     def grinold_max_sharpe(self, sig):

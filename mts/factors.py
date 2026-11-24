@@ -85,6 +85,16 @@ def daily_rf(index: pd.DatetimeIndex, monthly_rf: pd.Series) -> pd.Series:
     return pd.Series((1 + rate) ** (1 / days.values) - 1, index=index)
 
 
+def tbill_annual(date) -> float:
+    """The annualised 1-month T-bill rate known on `date`: the return of the bill bought at the end of
+    `date`'s month and held through the next month, compounded to a year. Used as the risk-free
+    rate in Black-Litterman views, so it must not use returns after `date`."""
+    monthly = _parse(FACTOR_DIR / FILES["five_factors_monthly"])["RF"]
+    monthly.index = monthly.index.to_period("M")
+    nxt = pd.Timestamp(date).to_period("M") + 1
+    return float((1 + monthly.loc[nxt]) ** 12 - 1)
+
+
 def load() -> pd.DataFrame:
     """Daily factor returns and the risk-free rate, as decimals: Mkt-RF, SMB, HML, RMW, CMA, Mom, RF.
 

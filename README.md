@@ -10,7 +10,7 @@ A research project that selects S&P 500 stocks with a momentum signal, forms ret
 
 ## Results
 
-2010–2023, walk-forward, after 10 bps costs, price returns:
+2010–2023, walk-forward, after 10 bps costs, price returns. Sharpe ratios in Phases 1–7 subtract a constant 3% risk-free rate; with the actual T-bill rate (Phase 8) every Sharpe ratio is 0.10–0.13 higher and the strategy trails the S&P 500 proxy (0.625 vs 0.640):
 
 | | CAGR | Volatility | Sharpe | Max drawdown | Turnover / yr | t-stat vs S&P | 2023 |
 |---|---|---|---|---|---|---|---|
@@ -199,7 +199,8 @@ from [Kenneth French's data library](https://mba.tuck.dartmouth.edu/pages/facult
 ![Factor tilts relative to the S&P 500 proxy](images/phase8_factor_tilts.png)
 
 * **Real risk-free rate.** The T-bill averaged 0.84% a year, not 3%. Every Sharpe ratio rises by 0.10–0.13,
-  and the baseline now trails the S&P 500 proxy (0.625 vs 0.640).
+  and the baseline now trails the S&P 500 proxy (0.625 vs 0.640). Using the T-bill inside the baseline's
+  Black-Litterman views too barely changes it (Sharpe 0.623).
 * **Attribution.** Relative to the S&P 500 proxy, the baseline is long momentum (+0.22, t 10.5) and tilted
   against conservative-investment and value stocks (CMA −0.24, HML −0.13): what is left is +0.69% a year
   (t 0.30). The Phase 6 portfolio has the cap-weighted top 50's mega-cap tilts. Across all 47 variants, factor
@@ -244,12 +245,12 @@ Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA 
 
 | File | Purpose |
 |------|---------|
-| `main.ipynb` | The full pipeline, backtests, analysis and findings (a few minutes; faster once the ARIMA cache exists) |
+| `main.ipynb` | The baseline strategy: pipeline, backtests, analysis and findings, run on the `mts` package (about 4 minutes once the ARIMA cache exists) |
 | `signal-research.ipynb` | Phase 5: signal tests (IC, quintiles, Fama-MacBeth) and Grinold-alpha portfolios (about 1 minute once `main.ipynb` has built the ARIMA cache) |
 | `portfolio-construction.ipynb` | Phase 6: risk model, benchmark-relative optimiser, forecast vs realised risk, sensitivity (about 4 minutes) |
 | `momentum-variants-and-risk.ipynb` | Phase 7: residual and volatility-managed momentum, risk-forecast diagnostics, alpha-aligned risk model (about 4 minutes) |
 | `attribution-and-inference.ipynb` | Phase 8: all 47 variants rebuilt; T-bill Sharpe ratios, factor attribution, bootstrap tests, deflated Sharpe ratio, probability of backtest overfitting (about 8 minutes the first time, then cached) |
-| `mts/` | Package shared by the Phase 5–8 notebooks: `data` (cleaning, point-in-time universe), `baseline` (the `main.ipynb` strategy, same logic), `backtest`, `signals`, `risk`, `optimize`, `strategies` (every variant tested), `factors` (Fama-French download), `inference` (bootstrap, deflated Sharpe, PBO), `plotting`, `config` |
+| `mts/` | Package used by every notebook: `data` (cleaning, point-in-time universe), `baseline` (the `main.ipynb` strategy), `arima` (the ARIMA views), `backtest`, `signals`, `risk`, `optimize`, `strategies` (every variant tested), `factors` (Fama-French download), `inference` (bootstrap, deflated Sharpe, PBO), `plotting`, `config` |
 | `tests/` | Unit tests on synthetic data (Black-Litterman identities, Grinold alpha, point-in-time IC, risk model, optimiser constraints); no Bloomberg data needed |
 | `results/` | Tables behind every Phase 5–8 number in this README, as CSV |
 | `factors/` | Fama-French factor files (downloaded, not committed) and `manifest.json` with their URLs, checksums and CRSP vintage |
@@ -281,8 +282,8 @@ jupyter nbconvert --to notebook --execute --inplace signal-research.ipynb portfo
     momentum-variants-and-risk.ipynb attribution-and-inference.ipynb
 ```
 
-The Phase 5 and 6 notebooks first check that the `mts` package reproduces the baseline exactly
-(Sharpe 0.52, 453% turnover) before running anything new.
+`signal-research.ipynb` first checks that the `mts` package reproduces the baseline exactly (Sharpe 0.52,
+453% turnover), and `attribution-and-inference.ipynb` checks results reported in Phases 1–6 before using them.
 
 ---
 
@@ -387,12 +388,12 @@ The notebook also went from 18MB to under 1MB: it now has 5 summary charts inste
 
 | # | Task | Outcome |
 |---|------|---------|
-| 8.1 | Fama-French data and the real risk-free rate | Daily five factors and momentum, monthly T-bill (CRSP vintage 202609), with a manifest of URLs and checksums. T-bill averaged 0.84% a year; the baseline's Sharpe ratio is 0.625 vs 0.640 for the S&P 500 proxy |
+| 8.1 | Fama-French data and the real risk-free rate | Daily five factors and momentum, monthly T-bill (CRSP vintage 202609), with a manifest of URLs and checksums. T-bill averaged 0.84% a year; the baseline's Sharpe ratio is 0.625 vs 0.640 for the S&P 500 proxy. With the T-bill also inside the views (a correction check, not a trial): 0.623 |
 | 8.2 | Every variant in one place | `mts.strategies` rebuilds all 47 variants from Phases 1–7 and reproduces their reported results |
 | 8.3 | Factor attribution | Relative to the S&P 500 proxy: momentum-and-growth tilts for the baseline, mega-cap tilts for the optimised portfolios; factor alpha t-statistics from −1.79 to +1.02 |
 | 8.4 | Sharpe-ratio tests | Block bootstrap: no difference significant (lowest p-value 0.37) |
 | 8.5 | Multiple-testing corrections | Deflated Sharpe ratio of the best variant 0.65–0.86; PBO 0.49 and 0.65 within each group of variants |
-| 8.6 | Code | `mts.factors`, `mts.inference`, `mts.strategies`; 36 unit tests in all |
+| 8.6 | Code | `mts.factors`, `mts.inference`, `mts.strategies`, `mts.arima`; `main.ipynb` now runs on the package with identical results; universe ordering made deterministic; 37 unit tests in all |
 
 ---
 
@@ -438,7 +439,7 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 | Idea | Why |
 |---|---|
 | ~~Factor regressions against Fama-French 5 factors plus momentum~~ | Done in Phase 8: the baseline's extra return is a momentum-and-growth tilt; no factor alpha is significant |
-| ~~Use real T-bill rates for the risk-free rate~~ | Done in Phase 8 for every Sharpe ratio (average 0.84% a year). Still to do: the Black-Litterman views in `main.ipynb` (Q = forecast − 3%) |
+| ~~Use real T-bill rates for the risk-free rate~~ | Done in Phase 8, for every Sharpe ratio and, as a check, inside the baseline's views (Sharpe 0.625 → 0.623) |
 | Sector classifications (GICS) | Enables sector attribution, sector-neutral momentum and sector caps; in 2023 the strategy was effectively a sector bet against tech |
 
 ### 4. Portfolio construction
@@ -468,7 +469,7 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 ### 7. Engineering
 | Idea | Why |
 |---|---|
-| ~~Move the code into a Python package with unit tests~~ | Done in Phase 6 (`mts/`, `tests/`). Still to do: test against the published He-Litterman example, and move `main.ipynb` onto the package |
+| ~~Move the code into a Python package with unit tests~~ | Done in Phases 6–8 (`mts/`, `tests/`); every notebook, `main.ipynb` included, runs on it. Still to do: test against the published He-Litterman example |
 | Synthetic sample dataset | Lets anyone run the notebook end-to-end without Bloomberg data |
 | Continuous integration (GitHub Actions) | Run the tests and a small backtest on every push |
 | Config file instead of notebook constants | Run experiments from the command line and log each run's settings and results |

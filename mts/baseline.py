@@ -91,15 +91,16 @@ def max_sharpe(mu: np.ndarray, Sigma: np.ndarray, max_weight: float) -> np.ndarr
 
 
 def black_litterman(date, tickers, caps, views, tau=0.05, max_weight=0.20, cov="ledoit_wolf",
-                    use_views=True) -> pd.DataFrame:
+                    use_views=True, risk_free=None) -> pd.DataFrame:
     """main.ipynb's allocation: market-cap prior over `tickers`, ARIMA views (annual) minus the
-    risk-free rate, then max-Sharpe. Tickers with under 80% of the covariance window are dropped."""
+    risk-free rate, then max-Sharpe. Tickers with under 80% of the covariance window are dropped.
+    `risk_free`: annual rate subtracted from the views; None keeps main.ipynb's constant 3%."""
     rets = data.daily_returns(date, tickers)
     tickers = list(rets.columns)
     Sigma = covariance(rets, cov)
     w_mkt = (caps[tickers] / caps[tickers].sum()).values
     pi = implied_returns(Sigma, w_mkt)
-    Q = np.array([views[t] for t in tickers]) - C.RISK_FREE
+    Q = np.array([views[t] for t in tickers]) - (C.RISK_FREE if risk_free is None else risk_free)
     if use_views:
         mu, Sigma_bl = bl_posterior(Sigma, pi, Q, tau)
     else:

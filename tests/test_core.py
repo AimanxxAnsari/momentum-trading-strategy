@@ -381,3 +381,15 @@ def test_daily_rf_compounds_to_the_monthly_rate():
     d = factors.daily_rf(idx, monthly)
     assert (1 + d.loc["2020-01"]).prod() - 1 == pytest.approx(0.003)
     assert (1 + d.loc["2020-02"]).prod() - 1 == pytest.approx(0.001)
+
+
+def test_tbill_annual_uses_the_next_month_known_on_the_date(tmp_path, monkeypatch):
+    import zipfile
+    from mts import factors
+    text = ("This file was created by using the 202609 CRSP database.\n\n"
+            ",Mkt-RF,SMB,HML,RMW,CMA,RF\n202001,1,0,0,0,0,0.10\n202002,1,0,0,0,0,0.20\n\n")
+    with zipfile.ZipFile(tmp_path / factors.FILES["five_factors_monthly"], "w") as z:
+        z.writestr("x.csv", text)
+    monkeypatch.setattr(factors, "FACTOR_DIR", tmp_path)
+    # On 31 January the bill for February (0.20% a month) is known; January's is not used
+    assert factors.tbill_annual("2020-01-31") == pytest.approx(1.002 ** 12 - 1)

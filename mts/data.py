@@ -47,7 +47,11 @@ def _clean() -> dict:
     snapshots = {d: {l.split(" ")[0] for l in s} for d, s in snapshot_listings.items()}
     snapshot_dates = np.array(list(snapshots), dtype="datetime64[ns]")
 
-    df = pd.read_csv(C.DATA_PATH, parse_dates=["date"]).dropna(subset=["PX_LAST"])
+    raw = pd.read_csv(C.DATA_PATH, parse_dates=["date"])
+    stats = {"raw rows": len(raw), "raw listings": raw["ticker"].nunique(),
+             "dividend-yield coverage": raw["DVD_YLD_IND"].notna().mean()}
+    df = raw.dropna(subset=["PX_LAST"]).copy()
+    del raw
     df["listing"] = df["ticker"]
     df["ticker"] = df["listing"].str.split(" ").str[0]
     # Keep the listing named in the latest snapshot when a company has two listings on a date
@@ -58,10 +62,15 @@ def _clean() -> dict:
     df = df.merge(named, on=["snapshot", "listing"], how="left")
     df["in_snapshot"] = df["in_snapshot"].fillna(False).astype(bool)
     df["history"] = df.groupby("listing")["date"].transform("size")
+    dup = df[df.duplicated(["ticker", "date"], keep=False)]
+    spread = dup.groupby(["ticker", "date"])["PX_LAST"].agg(lambda s: s.max() / s.min() - 1)
+    stats.update({"company-dates with two listings": len(spread), "listings disagreeing by >0.5%": int((spread > 0.005).sum())})
     df = (df.sort_values(["ticker", "date", "in_snapshot", "history"], ascending=[True, True, False, False])
             .drop_duplicates(["ticker", "date"]))
+    stats.update({"clean rows": len(df), "companies": df["ticker"].nunique(),
+                  "first date": df["date"].min(), "last date": df["date"].max()})
     wide = lambda col: df.pivot(index="date", columns="ticker", values=col)
-    return {"prices": wide("PX_LAST"), "mcap": wide("CUR_MKT_CAP"), "book": wide("BOOK_VAL_PER_SH"),
+    return {"stats": stats, "prices": wide("PX_LAST"), "mcap": wide("CUR_MKT_CAP"), "book": wide("BOOK_VAL_PER_SH"),
             "volume": wide("PX_VOLUME"), "snapshots": snapshots}
 
 
@@ -69,7 +78,9 @@ def _clean() -> dict:
 def load() -> dict:
     path = C.CACHE_DIR / "clean_data.pkl"
     if path.exists():
-        return pickle.load(open(path, "rb"))
+        d = pickle.load(open(path, "rb"))
+        if "stats" in d:                       # caches written before the cleaning statistics are rebuilt
+            return d
     d = _clean()
     C.CACHE_DIR.mkdir(exist_ok=True)
     pickle.dump(d, open(path, "wb"))
@@ -92,6 +103,11 @@ def snapshots() -> dict:
     return load()["snapshots"]
 
 
+def cleaning_stats() -> dict:
+    """What cleaning did: raw and clean row counts, duplicate listings, dividend coverage, date range."""
+    return load()["stats"]
+
+
 def constituents(date) -> set:
     """Index members in the most recent snapshot on or before `date`."""
     s = snapshots()
@@ -102,10 +118,11 @@ def constituents(date) -> set:
 def universe(date, size: int = C.UNIVERSE_SIZE) -> pd.Series:
     """Largest index members with a price on `date`: market caps, largest first."""
     P, M = prices(), mcap()
-    members = [t for t in constituents(date) if t in P.columns]
+    members = sorted(t for t in constituents(date) if t in P.columns)   # sorted: sets have no fixed order
     caps = M.loc[:date, members].iloc[-5:].ffill().iloc[-1]
     caps = caps[P.loc[date, members].notna()].dropna()
-    return caps.sort_values(ascending=False).head(size)
+    # Stable sort, so equal caps (e.g. GOOG and GOOGL) keep alphabetical order on every run
+    return caps.sort_values(ascending=False, kind="mergesort").head(size)
 
 
 def period_ends(start, end, freq: str = "Q") -> list:
