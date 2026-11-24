@@ -10,3 +10,6 @@ dataset/
 
 # ARIMA forecast cache (recomputed by the notebook)
 cache/
+
+# Python
+__pycache__/

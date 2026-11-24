@@ -2,7 +2,7 @@
 
 A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in quarterly walk-forward backtests (2023, and 2010–2023), after transaction costs, against market benchmarks.
 
-> **Status:** Phases 1–4 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58).
+> **Status:** Phases 1–5 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). **Phase 5** shows why: [signal research](#signal-research-phase-5) finds no momentum premium in the S&P 500 over 2003–2023, so there was little for any portfolio to capture.
 
 ![Growth of $1, 2010–2023](images/equity_curve.png)
 
@@ -71,6 +71,38 @@ Momentum at the end of 2022 pointed towards energy and defensive stocks, while 2
 
 ---
 
+## Signal research (Phase 5)
+
+[`signal-research.ipynb`](signal-research.ipynb) tests each signal on its own before building portfolios, then
+turns signals into expected returns the standard way and measures how much of the signal reaches the portfolio.
+Monthly, 2003–2023, point-in-time S&P 500 (about 500 stocks) and its 50 largest members.
+
+![Rank IC by signal](images/phase5_ic.png)
+
+* **No momentum premium.** In the full S&P 500 no signal has a significant information coefficient (IC) at
+  1, 3, 6 or 12 months. 12-1 momentum's top-minus-bottom quintile earned −1.8% a year (t −0.41); it crashed
+  in the 2009 rebound and never recovered.
+* **The historical-mean signal is the 2017–2023 growth rally.** It is the only significant signal in the top 50
+  (3-month IC 0.056, t 2.5), but its IC is 0.001 in 2003–2009, 0.034 in 2010–2016 and 0.136 in 2017–2023, and
+  it falls to t 1.21 once momentum, size, volatility, value and reversal are controlled for (Fama-MacBeth). It
+  is correlated −0.35 with book-to-price: it picks growth stocks.
+
+![Quintile spreads](images/phase5_quintile_spreads.png)
+
+* **Grinold alphas** (alpha = IC × volatility × z-score, IC estimated only from past data) make the portfolio
+  follow its signal: the transfer coefficient rises from about 0.16 to 0.70, and it holds 12–23 names instead
+  of 7. With no alpha, the optimiser returns the market portfolio, as it should.
+* **But the signals are weak and max-Sharpe overtrades them.** A momentum alpha with a standard deviation of
+  0.8% a year still produces 344% turnover and a Sharpe of 0.42. The historical-mean alpha reaches 0.54 but
+  with a −50.5% drawdown in 2021-22, holding Tesla and Mastercard at the 20% cap.
+* **Since 2005, nothing beats cap-weighting** (Sharpe 0.32 for both benchmarks, including 2008-09).
+* **A bug in the ARIMA views:** they were median, not expected, returns, which penalised volatile stocks.
+  Correcting them raises the baseline's Sharpe from 0.52 to 0.60 (t 1.26, not significant).
+
+![Alpha portfolios: Sharpe vs turnover](images/phase5_alpha_backtest.png)
+
+---
+
 ## How the pipeline works
 
 All the main work is in [`main.ipynb`](main.ipynb). On each rebalance date (the last trading day of each quarter), it runs:
@@ -100,10 +132,12 @@ Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA 
 | File | Purpose |
 |------|---------|
 | `main.ipynb` | The full pipeline, backtests, analysis and findings (a few minutes; faster once the ARIMA cache exists) |
+| `signal-research.ipynb` | Phase 5: signal tests (IC, quintiles, Fama-MacBeth) and Grinold-alpha portfolios (about 1 minute once `main.ipynb` has built the ARIMA cache) |
+| `research.py` | Code shared by `signal-research.ipynb`: cleaning, universe, Black-Litterman and backtest engine copied unchanged from `main.ipynb`, plus the Phase 5 signal and alpha functions |
 | `images/` | Charts exported by the notebook and used in this README |
 | `requirements.txt` | Package versions the notebook was verified with |
 | `archive/` | Phase 1 notebooks, kept for reference |
-| `cache/` | ARIMA forecast cache, created by the notebook (not committed) |
+| `cache/` | ARIMA forecasts, cleaned data and the monthly signal panel, created by the notebooks (not committed) |
 
 ### Data (not included)
 
@@ -112,6 +146,8 @@ The data is not in this repository: it is too large for GitHub and may not be re
 - `tickers/SPX as of <date>.xlsx`: quarterly snapshots of S&P 500 constituents, 2000–2023 (columns include `Ticker`)
 - `tickers/spx_companies_historical_data.csv`: daily data for each ticker, with these columns:
   `ticker, date, PX_OPEN, PX_HIGH, PX_LOW, PX_LAST, PX_VOLUME, DVD_YLD_IND, EPS, BOOK_VAL_PER_SH, CUR_MKT_CAP`
+
+Prices are split-adjusted. `DVD_YLD_IND` and `EPS` are empty in every row. `BOOK_VAL_PER_SH` is stamped at the fiscal period end, before it is published, so Phase 5 lags it by about 3 months.
 
 ### Setup
 
@@ -195,9 +231,20 @@ Status key: ⬜ To do · 🔄 In progress · ✅ Done
 | 4.3 | Visual report | 12 charts, built on one colour-blind-checked palette with a fixed colour per portfolio, exported to `images/` and shown in this README. | ✅ Done |
 | 3.1 | Dividends (carried over) | Still blocked. The free alternative (Yahoo Finance) has no data for most delisted companies, so it would cover the survivors only and reintroduce survivorship bias. Needs a point-in-time total-return source (CRSP, or Bloomberg `TOT_RETURN_INDEX_GROSS_DVDS`). | ⛔ Blocked (no data) |
 
+### Phase 5: Signal research ✅ Complete
+
+| # | Task | Outcome | Status |
+|---|------|---------|--------|
+| 5.1 | Test each signal on its own | Eight signals, monthly 2003–2023, full S&P 500 and top 50: rank IC at 1/3/6/12 months with Newey-West t-statistics, three sub-periods, quintile portfolios, Fama-MacBeth regressions. No momentum premium; the historical-mean IC comes from 2017–2023 and is not significant after controls | ✅ Done |
+| 5.2 | Grinold alphas into Black-Litterman | alpha = IC × volatility × z-score with point-in-time IC estimates; prior over all 50 stocks; transfer coefficient measured (about 0.70). Backtested 2010–2023 and 2005–2023 | ✅ Done |
+| 5.3 | Check the data before using it | Prices are split-adjusted; `EPS` is empty; book value has about one quarter of look-ahead, so it is lagged | ✅ Done |
+| 5.4 | Correct the ARIMA views from median to expected returns | Found in review: e^(4m) − 1 understates the expected return by about σ²/2. Tested as a variant (Sharpe 0.52 → 0.60); `main.ipynb` itself is unchanged | ✅ Done |
+
 ---
 
 ## Next steps: ideas
+
+Phase 5 has covered the signal research in section 2 below (evaluating each signal, the historical-mean follow-up, extending back to 2005) and replaced Idzorek-style view confidence with Grinold alphas. Its main lesson for what comes next: the optimiser overtrades weak signals, so **benchmark-relative optimisation with a turnover penalty and a tracking-error budget** (section 4), using residual volatility from a risk model, is the next step.
 
 ### What a re-check of the results found
 
@@ -228,7 +275,7 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 | Follow up the historical-mean IC | Control for size and sector, and test 2003–2009, to see whether it is real skill or just the mega-cap tech decade |
 | Other momentum definitions | 6-month, 52-week-high or residual (beta-adjusted) momentum; check whether 12-1 is the weak link |
 | Volatility-scaled momentum | Scaling exposure down when momentum is volatile is documented to reduce momentum crashes |
-| Multi-factor model using the data's own `EPS` and `BOOK_VAL_PER_SH` | Value and momentum tend to be negatively correlated, so combining them usually gives a smoother result than either alone |
+| Multi-factor model with book-to-price | Value and momentum tend to be negatively correlated, so combining them usually gives a smoother result than either alone. `EPS` is empty in the data, so value is book-to-price only (lagged 3 months; see Phase 5) |
 | Market trend filter | Hold cash or the index when the S&P 500 is below its 200-day average, to avoid momentum's worst periods |
 | Monthly rebalancing | Momentum signals decay quickly; quarterly may be too slow, though costs rise |
 | Cross-sectional model instead of ARIMA | For example gradient boosting on momentum, value and volatility features to rank stocks, instead of 25 separate time-series models |
