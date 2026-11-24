@@ -2,7 +2,7 @@
 
 A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in quarterly walk-forward backtests (2023, and 2010–2023), after transaction costs, against market benchmarks.
 
-> **Status:** Phases 1–7 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). **Phase 5** shows why: [signal research](#signal-research-phase-5) finds no momentum premium in the S&P 500 over 2003–2023, so there was little for any portfolio to capture. **Phase 6** fixes the [portfolio construction](#portfolio-construction-phase-6) (turnover 453% → 28% a year, tracking error under control), which leaves the strategy earning about the benchmark: the signals carry almost no information. **Phase 7** tests [better momentum signals](#momentum-variants-and-risk-forecasts-phase-7): volatility management transforms the momentum factor's crash risk, but neither it nor residual momentum helps the long-only top-50 portfolio.
+> **Status:** Phases 1–8 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). **Phase 5** shows why: [signal research](#signal-research-phase-5) finds no momentum premium in the S&P 500 over 2003–2023, so there was little for any portfolio to capture. **Phase 6** fixes the [portfolio construction](#portfolio-construction-phase-6) (turnover 453% → 28% a year, tracking error under control), which leaves the strategy earning about the benchmark: the signals carry almost no information. **Phase 7** tests [better momentum signals](#momentum-variants-and-risk-forecasts-phase-7): volatility management transforms the momentum factor's crash risk, but neither it nor residual momentum helps the long-only top-50 portfolio. **Phase 8** [checks the conclusion](#attribution-and-robust-inference-phase-8) with the real T-bill rate, Fama-French attribution and multiple-testing corrections across all 47 variants: with the real risk-free rate the baseline trails the S&P 500 (Sharpe 0.625 vs 0.640), its extra return is a momentum-and-growth tilt, and no variant survives the corrections.
 
 ![Growth of $1, 2010–2023](images/equity_curve.png)
 
@@ -181,6 +181,41 @@ most 2×) on the S&P 500 top-minus-bottom momentum quintile, 245 months, before 
 
 ---
 
+## Attribution and robust inference (Phase 8)
+
+[`attribution-and-inference.ipynb`](attribution-and-inference.ipynb) rebuilds all 47 variants tested in Phases
+1–7 (`mts.strategies`) over 2010–2023 and applies four checks. Factor returns and the 1-month T-bill come
+from [Kenneth French's data library](https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html)
+(CRSP vintage 202609; URLs and checksums in `factors/manifest.json`).
+
+| | Sharpe (T-bill) | vs S&P 500 proxy (bootstrap p) | Factor alpha vs S&P 500 proxy (t) | Momentum loading | CMA loading |
+|---|---|---|---|---|---|
+| Baseline | 0.625 | −0.015 (0.91) | +0.69% (0.30) | +0.22 | −0.24 |
+| Best variant by Sharpe (max weight 10%) | 0.715 | +0.075 (0.51) | +1.67% (0.97) | +0.20 | −0.16 |
+| Best variant by IR (ARIMA views corrected) | 0.703 | +0.063 (0.66) | +2.41% (1.02) | +0.23 | −0.33 |
+| Phase 6 active, historical mean | 0.660 | +0.020 (0.73) | +0.34% (0.43) | +0.04 | −0.14 |
+| Cap-weight S&P 500 proxy | 0.640 | — | — | — | — |
+
+![Factor tilts relative to the S&P 500 proxy](images/phase8_factor_tilts.png)
+
+* **Real risk-free rate.** The T-bill averaged 0.84% a year, not 3%. Every Sharpe ratio rises by 0.10–0.13,
+  and the baseline now trails the S&P 500 proxy (0.625 vs 0.640).
+* **Attribution.** Relative to the S&P 500 proxy, the baseline is long momentum (+0.22, t 10.5) and tilted
+  against conservative-investment and value stocks (CMA −0.24, HML −0.13): what is left is +0.69% a year
+  (t 0.30). The Phase 6 portfolio has the cap-weighted top 50's mega-cap tilts. Across all 47 variants, factor
+  alpha t-statistics range from −1.79 to +1.02.
+* **Sharpe differences** (block bootstrap): none has a p-value below 0.37.
+* **Multiple testing.** The best of 47 information ratios (0.338) beats what luck alone would give (0.238 for
+  47 independent tries) but its deflated Sharpe ratio is 0.65, or 0.80–0.86 allowing for how correlated the
+  variants are (2.2–4 effective trials); 0.95 is the usual bar.
+* **Overfitting.** Within each group of variants, against its own benchmark, the probability of backtest
+  overfitting is 0.49 (Phases 1–5) and 0.65 (Phases 6–7), and the in-sample winner's IR falls from 0.46–0.49
+  to 0.01–0.12 out of sample.
+
+![Do the trials that did best in 2010–2016 also do best in 2017–2023?](images/phase8_overfitting.png)
+
+---
+
 ## How the pipeline works
 
 All the main work is in [`main.ipynb`](main.ipynb). On each rebalance date (the last trading day of each quarter), it runs:
@@ -213,9 +248,11 @@ Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA 
 | `signal-research.ipynb` | Phase 5: signal tests (IC, quintiles, Fama-MacBeth) and Grinold-alpha portfolios (about 1 minute once `main.ipynb` has built the ARIMA cache) |
 | `portfolio-construction.ipynb` | Phase 6: risk model, benchmark-relative optimiser, forecast vs realised risk, sensitivity (about 4 minutes) |
 | `momentum-variants-and-risk.ipynb` | Phase 7: residual and volatility-managed momentum, risk-forecast diagnostics, alpha-aligned risk model (about 4 minutes) |
-| `mts/` | Package shared by the Phase 5 and 6 notebooks: `data` (cleaning, point-in-time universe), `baseline` (the `main.ipynb` strategy, same logic), `backtest`, `signals`, `risk`, `optimize`, `plotting`, `config` |
+| `attribution-and-inference.ipynb` | Phase 8: all 47 variants rebuilt; T-bill Sharpe ratios, factor attribution, bootstrap tests, deflated Sharpe ratio, probability of backtest overfitting (about 8 minutes the first time, then cached) |
+| `mts/` | Package shared by the Phase 5–8 notebooks: `data` (cleaning, point-in-time universe), `baseline` (the `main.ipynb` strategy, same logic), `backtest`, `signals`, `risk`, `optimize`, `strategies` (every variant tested), `factors` (Fama-French download), `inference` (bootstrap, deflated Sharpe, PBO), `plotting`, `config` |
 | `tests/` | Unit tests on synthetic data (Black-Litterman identities, Grinold alpha, point-in-time IC, risk model, optimiser constraints); no Bloomberg data needed |
-| `results/` | Tables behind every Phase 5 and 6 number in this README, as CSV |
+| `results/` | Tables behind every Phase 5–8 number in this README, as CSV |
+| `factors/` | Fama-French factor files (downloaded, not committed) and `manifest.json` with their URLs, checksums and CRSP vintage |
 | `images/` | Charts exported by the notebooks and used in this README |
 | `requirements.txt` | Package versions the notebook was verified with |
 | `archive/` | Phase 1 notebooks, kept for reference |
@@ -231,13 +268,17 @@ The data is not in this repository: it is too large for GitHub and may not be re
 
 Prices are split-adjusted. `DVD_YLD_IND` and `EPS` are empty in every row. `BOOK_VAL_PER_SH` is stamped at the fiscal period end, before it is published, so Phase 5 lags it by about 3 months.
 
+Phase 8 also uses the daily Fama-French five factors, the daily momentum factor and the monthly 1-month T-bill return from Kenneth French's data library, downloaded by `python -m mts.factors` (public; recorded in `factors/manifest.json`).
+
 ### Setup
 
 ```bash
 pip install -r requirements.txt
 python -m pytest tests/                       # unit tests, no data needed (about 2 seconds)
 jupyter notebook main.ipynb                   # baseline; builds the ARIMA cache used by Phases 5 and 6
-jupyter nbconvert --to notebook --execute --inplace signal-research.ipynb portfolio-construction.ipynb
+python -m mts.factors                         # Fama-French factors and T-bill rate for Phase 8
+jupyter nbconvert --to notebook --execute --inplace signal-research.ipynb portfolio-construction.ipynb \
+    momentum-variants-and-risk.ipynb attribution-and-inference.ipynb
 ```
 
 The Phase 5 and 6 notebooks first check that the `mts` package reproduces the baseline exactly
@@ -342,11 +383,22 @@ The notebook also went from 18MB to under 1MB: it now has 5 summary charts inste
 | 7.4 | Diagnose the risk forecasts | Accurate for random portfolios (0.98) and specific risk (0.98); the alpha-aligned model fixes the historical-mean portfolio (1.17 → 1.10); momentum's error comes from two extreme quarters |
 | 7.5 | Code | `risk.add_alpha_factor`, exponential weights, `signals.residual_momentum`, `signals.vol_scale`, `backtest.bias_statistic`; 29 unit tests in all |
 
+### Phase 8: Attribution and robust inference
+
+| # | Task | Outcome |
+|---|------|---------|
+| 8.1 | Fama-French data and the real risk-free rate | Daily five factors and momentum, monthly T-bill (CRSP vintage 202609), with a manifest of URLs and checksums. T-bill averaged 0.84% a year; the baseline's Sharpe ratio is 0.625 vs 0.640 for the S&P 500 proxy |
+| 8.2 | Every variant in one place | `mts.strategies` rebuilds all 47 variants from Phases 1–7 and reproduces their reported results |
+| 8.3 | Factor attribution | Relative to the S&P 500 proxy: momentum-and-growth tilts for the baseline, mega-cap tilts for the optimised portfolios; factor alpha t-statistics from −1.79 to +1.02 |
+| 8.4 | Sharpe-ratio tests | Block bootstrap: no difference significant (lowest p-value 0.37) |
+| 8.5 | Multiple-testing corrections | Deflated Sharpe ratio of the best variant 0.65–0.86; PBO 0.49 and 0.65 within each group of variants |
+| 8.6 | Code | `mts.factors`, `mts.inference`, `mts.strategies`; 36 unit tests in all |
+
 ---
 
 ## Next steps: ideas
 
-Phase 5 covered the signal research in section 2 below (evaluating each signal, the historical-mean follow-up, extending back to 2005) and replaced Idzorek-style view confidence with Grinold alphas. Phase 6 covered section 4 (benchmark-relative optimisation with a tracking-error budget and a turnover penalty, with the transfer coefficient reported) and the package and unit tests in section 7. Phase 7 tested residual and volatility-managed momentum (section 2) and diagnosed the risk forecasts: the risk model is accurate, and aligning it with the alpha fixes the forecasts for the historical-mean strategy. What remains is mainly **signals with real information in large caps**, which none tested so far have, and a **factor attribution** of what little active return there is (section 3).
+Phase 5 covered the signal research in section 2 below (evaluating each signal, the historical-mean follow-up, extending back to 2005) and replaced Idzorek-style view confidence with Grinold alphas. Phase 6 covered section 4 (benchmark-relative optimisation with a tracking-error budget and a turnover penalty, with the transfer coefficient reported) and the package and unit tests in section 7. Phase 7 tested residual and volatility-managed momentum (section 2) and diagnosed the risk forecasts: the risk model is accurate, and aligning it with the alpha fixes the forecasts for the historical-mean strategy. Phase 8 covered the factor attribution and real T-bill rates (section 3) and the deflated Sharpe ratio, bootstrap tests and PBO (section 5). What remains is mainly **signals with real information in large caps**, which none tested so far have, and **out-of-sample confirmation** on data from 2024 onwards.
 
 ### What a re-check of the results found
 
@@ -385,8 +437,8 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 ### 3. Performance attribution
 | Idea | Why |
 |---|---|
-| Factor regressions against Fama-French 5 factors plus momentum | The first question a reviewer will ask: is there any alpha beyond known factors? Use Newey-West standard errors. The factor data is free from Ken French's data library |
-| Use real T-bill rates for the risk-free rate | The constant 3% overstates the 2010–2023 average (about 1%, near zero for years). It shifts every Sharpe ratio and the Black-Litterman views (Q = forecast − 3%) |
+| ~~Factor regressions against Fama-French 5 factors plus momentum~~ | Done in Phase 8: the baseline's extra return is a momentum-and-growth tilt; no factor alpha is significant |
+| ~~Use real T-bill rates for the risk-free rate~~ | Done in Phase 8 for every Sharpe ratio (average 0.84% a year). Still to do: the Black-Litterman views in `main.ipynb` (Q = forecast − 3%) |
 | Sector classifications (GICS) | Enables sector attribution, sector-neutral momentum and sector caps; in 2023 the strategy was effectively a sector bet against tech |
 
 ### 4. Portfolio construction
@@ -402,7 +454,7 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 | Idea | Why |
 |---|---|
 | Extend the backtest back to 2003 | The data starts in 2000; 2003 is the earliest date with full lookback windows. It adds the 2008 crisis and the 2009 rebound, when momentum famously crashed |
-| Deflated Sharpe ratio, block-bootstrap confidence intervals and the probability of backtest overfitting (PBO) | About 25 variants have been tested; the best Sharpe out of many tries is weaker evidence than it looks |
+| ~~Deflated Sharpe ratio, block-bootstrap confidence intervals and the probability of backtest overfitting (PBO)~~ | Done in Phase 8 across all 47 variants |
 | Out-of-sample confirmation | Fix the best settings (such as partial rebalancing) now and test them only on new data from 2024 onwards |
 | Walk-forward parameter selection | Let the backtest choose its settings using only past data at each date, instead of fixing them up front |
 | Random-portfolio benchmark | Compare against thousands of random portfolios of the same size to see where the strategy ranks by luck alone |

@@ -1,0 +1,7 @@
+,value
+PBO,0.7027195027195027
+splits,12870.0
+trials,47.0
+median logit,-0.6931471805599454
+"best in-sample Sharpe, in sample (mean)",0.5122317679855577
+"best in-sample Sharpe, out of sample (mean)",0.06921096955920301

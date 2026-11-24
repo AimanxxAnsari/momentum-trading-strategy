@@ -306,3 +306,78 @@ def test_bias_statistic_is_one_when_forecasts_are_right():
     # curve returns relative to a flat benchmark: per-period return = active (compounded levels)
     b = bt.bias_statistic(curve, bench, {d: te for d in dates}, dates)
     assert b["standardised"].std() == pytest.approx(1, abs=0.1)
+
+
+# -- Phase 8: inference and factor data ---------------------------------------------------
+
+from mts import inference as inf
+
+
+def test_factor_regression_recovers_alpha_and_loadings():
+    r = np.random.default_rng(20)
+    T = 5000
+    F = pd.DataFrame(r.normal(0, 0.01, (T, 2)), columns=["Mkt-RF", "SMB"])
+    y = 0.0002 + 1.1 * F["Mkt-RF"] - 0.3 * F["SMB"] + r.normal(0, 0.002, T)
+    out = inf.factor_regression(y, F)
+    assert out["alpha (annual)"] == pytest.approx(0.0002 * 252, rel=0.1)
+    assert out["Mkt-RF"] == pytest.approx(1.1, abs=0.01) and out["SMB"] == pytest.approx(-0.3, abs=0.01)
+
+
+def test_sharpe_difference_bootstrap_detects_a_real_difference_and_not_a_null_one():
+    r = np.random.default_rng(21)
+    idx = pd.bdate_range("2000-01-01", periods=3000)
+    a = pd.Series(r.normal(0.0008, 0.01, 3000), index=idx)
+    same = inf.sharpe_difference_bootstrap(a, a, n_boot=300)
+    assert same["difference"] == pytest.approx(0) and same["p"] > 0.9
+    b = pd.Series(r.normal(-0.0004, 0.01, 3000), index=idx)
+    diff = inf.sharpe_difference_bootstrap(a, b, n_boot=300)
+    assert diff["p"] < 0.01 and diff["ci low"] > 0
+
+
+def test_probabilistic_sharpe_matches_the_normal_formula():
+    sr, T = 0.05, 1000
+    expected = stats_norm_cdf = __import__("scipy").stats.norm.cdf(sr * np.sqrt(T - 1) / np.sqrt(1 + sr ** 2 / 2))
+    assert inf.probabilistic_sharpe(sr, T, skew=0.0, kurt=3.0) == pytest.approx(expected)
+
+
+def test_expected_max_sharpe_matches_simulation():
+    r = np.random.default_rng(22)
+    n, sd = 50, 0.02
+    sim = r.normal(0, sd, (20000, n)).max(axis=1).mean()
+    assert inf.expected_max_sharpe(n, sd ** 2) == pytest.approx(sim, rel=0.05)
+    assert inf.expected_max_sharpe(100, sd ** 2) > inf.expected_max_sharpe(10, sd ** 2)
+
+
+def test_pbo_is_about_one_half_for_pure_noise_and_low_for_a_real_edge():
+    # One sample's PBO is noisy (its splits reuse the same data); averaged over samples it is about 0.5
+    pbos = [inf.pbo_cscv(pd.DataFrame(np.random.default_rng(s).normal(0, 0.01, (3200, 20))), n_splits=10)["PBO"]
+            for s in range(10)]
+    assert 0.35 < np.mean(pbos) < 0.65
+    noise = pd.DataFrame(np.random.default_rng(23).normal(0, 0.01, (3200, 20)))
+    edge = noise.copy()
+    edge[0] += 0.002
+    assert inf.pbo_cscv(edge, n_splits=10)["PBO"] < 0.05
+
+
+def test_ken_french_file_parsing(tmp_path, monkeypatch):
+    import zipfile
+    from mts import factors
+    text = ("This file was created by using the 202609 CRSP database.\n\n"
+            ",Mkt-RF,SMB,HML,RMW,CMA,RF\n20200102,   1.00,  -0.50,  0.10,  0.00,  0.20,  0.01\n"
+            "20200103,  -2.00,   0.50, -0.10,  0.10, -0.20,  0.01\n\n Annual Factors\n")
+    path = tmp_path / "x.zip"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("x.csv", text)
+    df = factors._parse(path)
+    assert list(df.columns) == ["Mkt-RF", "SMB", "HML", "RMW", "CMA", "RF"]
+    assert df.loc["2020-01-03", "Mkt-RF"] == pytest.approx(-0.02) and len(df) == 2
+    assert factors._vintage(text) == "202609"
+
+
+def test_daily_rf_compounds_to_the_monthly_rate():
+    from mts import factors
+    idx = pd.bdate_range("2020-01-01", "2020-02-29")
+    monthly = pd.Series([0.003, 0.001], index=pd.to_datetime(["2020-01-01", "2020-02-01"]))
+    d = factors.daily_rf(idx, monthly)
+    assert (1 + d.loc["2020-01"]).prod() - 1 == pytest.approx(0.003)
+    assert (1 + d.loc["2020-02"]).prod() - 1 == pytest.approx(0.001)

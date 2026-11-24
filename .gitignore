@@ -14,3 +14,4 @@ cache/
 # Python
 __pycache__/
 !results/*.csv
+factors/*.zip

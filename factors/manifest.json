@@ -1,0 +1,27 @@
+{
+  "five_factors": {
+    "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_5_Factors_2x3_daily_CSV.zip",
+    "file": "F-F_Research_Data_5_Factors_2x3_daily_CSV.zip",
+    "csv_in_zip": "F-F_Research_Data_5_Factors_2x3_daily.csv",
+    "size_bytes": 150489,
+    "sha256": "e58577223032aa45071a46686f7068900c371b516c9eb04e28e974c34264f84f",
+    "crsp_vintage": "202609"
+  },
+  "momentum": {
+    "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Momentum_Factor_daily_CSV.zip",
+    "file": "F-F_Momentum_Factor_daily_CSV.zip",
+    "csv_in_zip": "F-F_Momentum_Factor_daily.csv",
+    "size_bytes": 85338,
+    "sha256": "e56d5bc845544e2993e77353b12c611cfce3149ef754f9b59fc67904ddadd369",
+    "crsp_vintage": "202609"
+  },
+  "five_factors_monthly": {
+    "downloaded_at": "2026-11-24T13:24:22+00:00",
+    "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_5_Factors_2x3_CSV.zip",
+    "file": "F-F_Research_Data_5_Factors_2x3_CSV.zip",
+    "csv_in_zip": "F-F_Research_Data_5_Factors_2x3.csv",
+    "size_bytes": 11971,
+    "sha256": "17d7a575e71d6764a70ddec3f8d887756c0eebf3a60f64d6ba95d2adde3fed26",
+    "crsp_vintage": "202609"
+  }
+}
