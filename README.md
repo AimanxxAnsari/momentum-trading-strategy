@@ -2,7 +2,7 @@
 
 A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in quarterly walk-forward backtests (2023, and 2010–2023), after transaction costs, against market benchmarks.
 
-> **Status:** Phases 1–5 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). **Phase 5** shows why: [signal research](#signal-research-phase-5) finds no momentum premium in the S&P 500 over 2003–2023, so there was little for any portfolio to capture.
+> **Status:** Phases 1–6 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). **Phase 5** shows why: [signal research](#signal-research-phase-5) finds no momentum premium in the S&P 500 over 2003–2023, so there was little for any portfolio to capture. **Phase 6** fixes the [portfolio construction](#portfolio-construction-phase-6) (turnover 453% → 28% a year, tracking error under control), which leaves the strategy earning about the benchmark: the signals carry almost no information.
 
 ![Growth of $1, 2010–2023](images/equity_curve.png)
 
@@ -103,6 +103,48 @@ Monthly, 2003–2023, point-in-time S&P 500 (about 500 stocks) and its 50 larges
 
 ---
 
+## Portfolio construction (Phase 6)
+
+[`portfolio-construction.ipynb`](portfolio-construction.ipynb) replaces max-Sharpe with the standard
+active-management setup: a **statistical risk model** (5 principal components of daily returns plus each
+stock's specific risk) and a **benchmark-relative optimiser** that maximises alpha minus a penalty on
+tracking error against the cap-weighted top 50 and the cost of each trade:
+
+$$\max_w \; h\,\alpha^\top(w-b) - h\,\lambda\,(w-b)^\top\Sigma(w-b) - \kappa\,c\,\lVert w - w_{\text{current}}\rVert_1$$
+
+long-only, at most 20% per stock, tracking error at most 4%. Alphas are Phase 5's Grinold alphas, now
+scaled by specific volatility. Main settings: $\lambda = 10$ (from Grinold's TE ≈ IC√N/λ, about 2% here)
+and $\kappa = 1$ (trades charged at their real cost).
+
+2010–2023, after 10 bps costs; active statistics against the cap-weighted top 50:
+
+| | Sharpe | Turnover / yr | Active return | Tracking error | IR (t) | Max drawdown |
+|---|---|---|---|---|---|---|
+| Active: historical mean | 0.54 | 28% | +0.3% | 1.6% | 0.16 (0.61) | −31.3% |
+| Active: momentum 12-1 | 0.54 | 25% | +0.1% | 0.8% | 0.09 (0.34) | −29.5% |
+| Active: composite | 0.54 | 40% | +0.3% | 1.5% | 0.20 (0.74) | −30.1% |
+| Phase 5 max-Sharpe: historical mean | 0.54 | 144% | +2.4% | 9.4% | 0.26 (0.97) | −50.5% |
+| Phase 5 max-Sharpe: momentum 12-1 | 0.42 | 344% | −1.3% | 7.6% | −0.17 (−0.65) | −32.3% |
+| Cap-weight top 50 | 0.53 | 22% | — | — | — | −30.0% |
+
+![Value relative to the cap-weighted top 50](images/phase6_relative_value.png)
+
+* **The construction problem is solved.** The same or a higher Sharpe ratio for a fifth of the turnover or
+  less (the benchmark itself turns over 22% from index changes), tracking error of 0.8–1.6% instead of
+  7.6–9.4%, and drawdowns within 1.3 points of the benchmark's (−30.0%). The portfolios hold 44–48 names, and 86–89% of their active risk is stock-specific.
+* **Which exposes how little the alphas are worth:** +0.1% to +0.3% a year, none significant, and +0.1%,
+  −0.1% and +0.2% over 2005–2023.
+* **The risk model underestimates active risk.** Realised tracking error divided by the forecast (the bias
+  statistic) is 1.17 for the historical mean, at the edge of the range expected from an accurate model
+  (0.81–1.19), and 1.32–1.57 for the other two. An equally weighted 3-year window reacts slowly.
+* **Sensitivity** (every setting reported): more active risk adds a little return for the historical mean
+  (+1.3% at 3.9% tracking error, t 1.20) and none for momentum; a higher trading penalty cuts turnover to
+  11–15% at no cost in return.
+
+![Sensitivity to risk aversion and trading penalty](images/phase6_sensitivity.png)
+
+---
+
 ## How the pipeline works
 
 All the main work is in [`main.ipynb`](main.ipynb). On each rebalance date (the last trading day of each quarter), it runs:
@@ -133,8 +175,11 @@ Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA 
 |------|---------|
 | `main.ipynb` | The full pipeline, backtests, analysis and findings (a few minutes; faster once the ARIMA cache exists) |
 | `signal-research.ipynb` | Phase 5: signal tests (IC, quintiles, Fama-MacBeth) and Grinold-alpha portfolios (about 1 minute once `main.ipynb` has built the ARIMA cache) |
-| `research.py` | Code shared by `signal-research.ipynb`: cleaning, universe, Black-Litterman and backtest engine copied unchanged from `main.ipynb`, plus the Phase 5 signal and alpha functions |
-| `images/` | Charts exported by the notebook and used in this README |
+| `portfolio-construction.ipynb` | Phase 6: risk model, benchmark-relative optimiser, forecast vs realised risk, sensitivity (about 4 minutes) |
+| `mts/` | Package shared by the Phase 5 and 6 notebooks: `data` (cleaning, point-in-time universe), `baseline` (the `main.ipynb` strategy, same logic), `backtest`, `signals`, `risk`, `optimize`, `plotting`, `config` |
+| `tests/` | Unit tests on synthetic data (Black-Litterman identities, Grinold alpha, point-in-time IC, risk model, optimiser constraints); no Bloomberg data needed |
+| `results/` | Tables behind every Phase 5 and 6 number in this README, as CSV |
+| `images/` | Charts exported by the notebooks and used in this README |
 | `requirements.txt` | Package versions the notebook was verified with |
 | `archive/` | Phase 1 notebooks, kept for reference |
 | `cache/` | ARIMA forecasts, cleaned data and the monthly signal panel, created by the notebooks (not committed) |
@@ -153,8 +198,13 @@ Prices are split-adjusted. `DVD_YLD_IND` and `EPS` are empty in every row. `BOOK
 
 ```bash
 pip install -r requirements.txt
-jupyter notebook main.ipynb
+python -m pytest tests/                       # unit tests, no data needed (about 2 seconds)
+jupyter notebook main.ipynb                   # baseline; builds the ARIMA cache used by Phases 5 and 6
+jupyter nbconvert --to notebook --execute --inplace signal-research.ipynb portfolio-construction.ipynb
 ```
+
+The Phase 5 and 6 notebooks first check that the `mts` package reproduces the baseline exactly
+(Sharpe 0.52, 453% turnover) before running anything new.
 
 ---
 
@@ -240,11 +290,20 @@ Status key: ⬜ To do · 🔄 In progress · ✅ Done
 | 5.3 | Check the data before using it | Prices are split-adjusted; `EPS` is empty; book value has about one quarter of look-ahead, so it is lagged | ✅ Done |
 | 5.4 | Correct the ARIMA views from median to expected returns | Found in review: e^(4m) − 1 understates the expected return by about σ²/2. Tested as a variant (Sharpe 0.52 → 0.60); `main.ipynb` itself is unchanged | ✅ Done |
 
+### Phase 6: Portfolio construction ✅ Complete
+
+| # | Task | Outcome | Status |
+|---|------|---------|--------|
+| 6.1 | Statistical risk model | 5 principal components of 3 years of daily returns plus specific risk, refitted each quarter; explains 63% of variance on average. Gives specific volatility for the alphas and splits active risk into factor and specific parts | ✅ Done |
+| 6.2 | Benchmark-relative optimiser | Alpha minus risk and trading penalties, tracking-error cap, long-only, 20% cap; starts from the drifted holdings so each trade's cost counts. Turnover 453% → 25–40%, tracking error 0.8–1.6% | ✅ Done |
+| 6.3 | Check the risk model's forecasts | Bias statistic 1.17–1.57: realised tracking error is higher than forecast | ✅ Done |
+| 6.4 | Package and tests | `research.py` replaced by the `mts/` package; 20 unit tests on synthetic data; every Phase 5 and 6 table exported to `results/`. The Phase 5 notebook gives the same numbers on the package | ✅ Done |
+
 ---
 
 ## Next steps: ideas
 
-Phase 5 has covered the signal research in section 2 below (evaluating each signal, the historical-mean follow-up, extending back to 2005) and replaced Idzorek-style view confidence with Grinold alphas. Its main lesson for what comes next: the optimiser overtrades weak signals, so **benchmark-relative optimisation with a turnover penalty and a tracking-error budget** (section 4), using residual volatility from a risk model, is the next step.
+Phase 5 covered the signal research in section 2 below (evaluating each signal, the historical-mean follow-up, extending back to 2005) and replaced Idzorek-style view confidence with Grinold alphas. Phase 6 covered section 4 (benchmark-relative optimisation with a tracking-error budget and a turnover penalty, with the transfer coefficient reported) and the package and unit tests in section 7. What remains is mainly **better signals** (residual and volatility-scaled momentum, section 2) and **a better risk model** (exponentially weighted, so the forecasts stop underestimating risk).
 
 ### What a re-check of the results found
 
@@ -290,9 +349,10 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 ### 4. Portfolio construction
 | Idea | Why |
 |---|---|
-| Mean-variance against the benchmark with a tracking-error target | Spreads the active bets over more names instead of 7 capped positions, so more of the forecast skill reaches the portfolio. Report the transfer coefficient before and after |
-| Set view confidence from forecast accuracy (Idzorek) | Currently every view gets the same weight relative to the prior; views should count in proportion to their measured IC |
-| Turnover penalty inside the optimiser | Trade only when the expected gain beats the cost, rather than adjusting after the fact |
+| ~~Mean-variance against the benchmark with a tracking-error target~~ | Done in Phase 6 |
+| ~~Set view confidence from forecast accuracy (Idzorek)~~ | Superseded by Grinold alphas in Phase 5 |
+| ~~Turnover penalty inside the optimiser~~ | Done in Phase 6 |
+| Exponentially weighted risk model | Phase 6's equally weighted 3-year model underestimates active risk (bias statistic 1.17–1.57) |
 | Compare other allocators | Minimum-variance, risk parity or hierarchical risk parity on the same picks |
 
 ### 5. Making the results trustworthy
@@ -313,7 +373,7 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 ### 7. Engineering
 | Idea | Why |
 |---|---|
-| Move the code into a Python package (`src/`) with unit tests | The Black-Litterman maths and backtest engine are where the original bugs were. Test the Black-Litterman code against the published He-Litterman example |
+| ~~Move the code into a Python package with unit tests~~ | Done in Phase 6 (`mts/`, `tests/`). Still to do: test against the published He-Litterman example, and move `main.ipynb` onto the package |
 | Synthetic sample dataset | Lets anyone run the notebook end-to-end without Bloomberg data |
 | Continuous integration (GitHub Actions) | Run the tests and a small backtest on every push |
 | Config file instead of notebook constants | Run experiments from the command line and log each run's settings and results |
