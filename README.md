@@ -2,6 +2,8 @@
 
 A research project that selects S&P 500 stocks with a momentum signal, forms return views with ARIMA, and allocates the portfolio with Black-Litterman. The strategy is tested in quarterly walk-forward backtests (2023, and 2010–2023), after transaction costs, against market benchmarks.
 
+> **Research note:** [`note/research-note.pdf`](note/research-note.pdf), a 4-page summary of the question, method and results (built from `results/` by `note/build_note.py`).
+>
 > **Status:** Phases 1–8 are complete; dividends remain blocked by the data. **Conclusion:** over 2010–2023 the strategy returned 12.2% a year against 11.1% for an S&P 500 proxy, but with more risk. Its Sharpe ratio is the same (0.52 vs 0.52) and the outperformance is not statistically significant (t-statistic 0.58). **Phase 5** shows why: [signal research](#signal-research-phase-5) finds no momentum premium in the S&P 500 over 2003–2023, so there was little for any portfolio to capture. **Phase 6** fixes the [portfolio construction](#portfolio-construction-phase-6) (turnover 453% → 28% a year, tracking error under control), which leaves the strategy earning about the benchmark: the signals carry almost no information. **Phase 7** tests [better momentum signals](#momentum-variants-and-risk-forecasts-phase-7): volatility management transforms the momentum factor's crash risk, but neither it nor residual momentum helps the long-only top-50 portfolio. **Phase 8** [checks the conclusion](#attribution-and-robust-inference-phase-8) with the real T-bill rate, Fama-French attribution and multiple-testing corrections across all 47 variants: with the real risk-free rate the baseline trails the S&P 500 (Sharpe 0.625 vs 0.640), its extra return is a momentum-and-growth tilt, and no variant survives the corrections.
 
 ![Growth of $1, 2010–2023](images/equity_curve.png)
@@ -207,7 +209,7 @@ from [Kenneth French's data library](https://mba.tuck.dartmouth.edu/pages/facult
   alpha t-statistics range from −1.79 to +1.02.
 * **Sharpe differences** (block bootstrap): none has a p-value below 0.37.
 * **Multiple testing.** The best of 47 information ratios (0.338) beats what luck alone would give (0.238 for
-  47 independent tries) but its deflated Sharpe ratio is 0.65, or 0.80–0.86 allowing for how correlated the
+  47 independent tries) but its deflated Sharpe ratio is 0.65, or 0.80–0.85 allowing for how correlated the
   variants are (2.2–4 effective trials); 0.95 is the usual bar.
 * **Overfitting.** Within each group of variants, against its own benchmark, the probability of backtest
   overfitting is 0.49 (Phases 1–5) and 0.65 (Phases 6–7), and the in-sample winner's IR falls from 0.46–0.49
@@ -253,6 +255,7 @@ Clean data ─▶ Point-in-time universe ─▶ Momentum selection ─▶ ARIMA 
 | `mts/` | Package used by every notebook: `data` (cleaning, point-in-time universe), `baseline` (the `main.ipynb` strategy), `arima` (the ARIMA views), `backtest`, `signals`, `risk`, `optimize`, `strategies` (every variant tested), `factors` (Fama-French download), `inference` (bootstrap, deflated Sharpe, PBO), `plotting`, `config` |
 | `tests/` | Unit tests on synthetic data (Black-Litterman identities, Grinold alpha, point-in-time IC, risk model, optimiser constraints); no Bloomberg data needed |
 | `results/` | Tables behind every Phase 5–8 number in this README, as CSV |
+| `note/` | The research note (`research-note.pdf`), its LaTeX source, and `build_note.py`, which fills every number in it from `results/` and compiles it with `pdflatex` |
 | `factors/` | Fama-French factor files (downloaded, not committed) and `manifest.json` with their URLs, checksums and CRSP vintage |
 | `images/` | Charts exported by the notebooks and used in this README |
 | `requirements.txt` | Package versions the notebook was verified with |
@@ -280,6 +283,7 @@ jupyter notebook main.ipynb                   # baseline; builds the ARIMA cache
 python -m mts.factors                         # Fama-French factors and T-bill rate for Phase 8
 jupyter nbconvert --to notebook --execute --inplace signal-research.ipynb portfolio-construction.ipynb \
     momentum-variants-and-risk.ipynb attribution-and-inference.ipynb
+python note/build_note.py                     # rebuild the research note from results/ (needs pdflatex)
 ```
 
 `signal-research.ipynb` first checks that the `mts` package reproduces the baseline exactly (Sharpe 0.52,
@@ -392,7 +396,7 @@ The notebook also went from 18MB to under 1MB: it now has 5 summary charts inste
 | 8.2 | Every variant in one place | `mts.strategies` rebuilds all 47 variants from Phases 1–7 and reproduces their reported results |
 | 8.3 | Factor attribution | Relative to the S&P 500 proxy: momentum-and-growth tilts for the baseline, mega-cap tilts for the optimised portfolios; factor alpha t-statistics from −1.79 to +1.02 |
 | 8.4 | Sharpe-ratio tests | Block bootstrap: no difference significant (lowest p-value 0.37) |
-| 8.5 | Multiple-testing corrections | Deflated Sharpe ratio of the best variant 0.65–0.86; PBO 0.49 and 0.65 within each group of variants |
+| 8.5 | Multiple-testing corrections | Deflated Sharpe ratio of the best variant 0.65–0.85; PBO 0.49 and 0.65 within each group of variants |
 | 8.6 | Code | `mts.factors`, `mts.inference`, `mts.strategies`, `mts.arima`; `main.ipynb` now runs on the package with identical results; universe ordering made deterministic; 37 unit tests in all |
 
 ---
@@ -420,8 +424,8 @@ These checks were run on the existing pipeline (2010–2023, top-50 universe, af
 ### 1. Reframe the research question
 | Idea | Why |
 |---|---|
-| Lead with "Does a forecast-driven Black-Litterman overlay add value to large-cap momentum?" | Turns the negative result into the finding; the layer-by-layer attribution becomes the core of the project |
-| Write a 3–5 page research note (PDF) | Abstract, method, results, limitations and references: the format quant research desks actually read. Link it at the top of the README |
+| ~~Lead with "Does a forecast-driven Black-Litterman overlay add value to large-cap momentum?"~~ | Done: the title question of the research note |
+| ~~Write a 3–5 page research note (PDF)~~ | Done: [`note/research-note.pdf`](note/research-note.pdf), linked at the top of this README |
 
 ### 2. Signal research
 | Idea | Why |
